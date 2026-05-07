@@ -97,27 +97,6 @@ export default function ChatPage() {
   // banner state, onContent() for direct scroll-on-change, and jumpDown()
   const { scrollRef: scrollContainerRef, showBanner, onContent, clearBanner, jumpDown } = useAutoScroll()
 
-  // Initial scroll on session load: using scrollTop directly to bypass CSS smooth scroll
-  const initialScrollDoneRef = useRef(false)
-  useEffect(() => {
-    if (activeSessionId && activeMessages.length > 0 && !initialScrollDoneRef.current) {
-      initialScrollDoneRef.current = true
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const container = scrollContainerRef.current
-          if (container) {
-            container.scrollTop = container.scrollHeight - container.clientHeight
-          }
-        })
-      })
-    }
-  }, [activeSessionId, activeMessages.length])
-
-  // Reset scroll flag when switching to a different session
-  useEffect(() => {
-    initialScrollDoneRef.current = false
-  }, [activeSessionId])
-
   const forceUpdate = useCallback(() => {
     setRenderKey((k) => k + 1)
   }, [])
@@ -214,6 +193,9 @@ export default function ChatPage() {
     setError(null)
     if (!messagesBySession.has(sessionId)) {
       loadMessages(sessionId)
+    } else {
+      // Messages already cached — scroll to bottom after re-render
+      requestAnimationFrame(() => onContent())
     }
     // Update URL hash with session slug
     const session = sessions.find((s) => s.session_id === sessionId)
