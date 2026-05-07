@@ -56,7 +56,7 @@ export default function ChatPage() {
   const [currentProviderLabel, setCurrentProviderLabel] = useState("")
   const [providers, setProviders] = useState<ModelProvider[]>([])
   const [modelChanging, setModelChanging] = useState(false)
-  const [modelLoading, setModelLoading] = useState(true)
+  const [modelLoading, setModelLoading] = useState(false)
 
   const [messagesBySession] = useState<Map<string, ChatMessage[]>>(
     () => new Map(),
@@ -99,27 +99,20 @@ export default function ChatPage() {
   const user = getStoredUser()
 
   // Scroll to bottom when messages load or session switches.
-  // Uses messagesEndRef so the last message sits above the input area.
+  // Uses direct scrollTop assignment to bypass CSS `scroll-behavior: smooth`
+  // so the initial scroll is instant, not animated from the top of the page.
   const initialScrollDoneRef = useRef(false)
   useEffect(() => {
     if (activeSessionId && activeMessages.length > 0 && !initialScrollDoneRef.current) {
       initialScrollDoneRef.current = true
-      // Double rAF to ensure layout is settled before scrolling
+      // Use useLayoutEffect equiv: schedule before paint. Double rAF to
+      // ensure layout is settled. Set scrollTop directly — this bypasses
+      // CSS scroll-behavior: smooth entirely.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          const spacer = messagesEndRef.current
           const container = scrollContainerRef.current
-          if (spacer && container) {
-            // Scroll the spacer into view, aligning its bottom with
-            // the container's end edge. scroll-padding-bottom on the
-            // container keeps it above the chatbox.
-            spacer.scrollIntoView({ block: "end" })
-            // Fallback: if scrollIntoView didn't respect scroll-padding,
-            // adjust manually by subtracting the container's clientHeight
-            // from its scrollHeight to pin the bottom.
-            if (container.scrollTop + container.clientHeight < container.scrollHeight) {
-              container.scrollTop = container.scrollHeight - container.clientHeight
-            }
+          if (container) {
+            container.scrollTop = container.scrollHeight - container.clientHeight
           }
         })
       })
@@ -180,51 +173,42 @@ export default function ChatPage() {
     localStorage.setItem("webchat_theme", darkMode ? "dark" : "light")
   }, [darkMode])
 
+  // Scroll event listener: tracks whether the user is near the bottom
+  // of the chat. Updates `isNearBottomRef` synchronously on every scroll
+  // event — more responsive than IntersectionObserver for rapid content
+  // expansion (e.g. reasoning box opening). Tolerates up to 8px of
+  // bottom-scroll distance as "at bottom".
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+
+    const handler = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8
+      isNearBottomRef.current = atBottom
+      setIsNearBottom(atBottom)
+      if (atBottom) setShowScrollButton(false)
+    }
+    el.addEventListener("scroll", handler, { passive: true })
+    return () => el.removeEventListener("scroll", handler)
+  }, [activeSessionId])
+
   // Auto-scroll to bottom when new content arrives.
-  // Uses isNearBottomRef to avoid stale-closure issues — the ref is
-  // updated synchronously by the IntersectionObserver callback while
-  // React state updates are batched.
-  // During streaming, we always attempt to scroll; we only skip if
-  // the sentinel ref is unavailable or the user has clearly scrolled up.
+  // Reads isNearBottomRef.current (synchronous ref, no stale closure)
+  // and either scrolls the spacer into view or reveals the scroll button.
   useEffect(() => {
     contentVersionRef.current += 1
-    const sentinel = bottomSentinelRef.current
-    if (!sentinel) return
 
     const isNear = isNearBottomRef.current
     if (isNear) {
-      // Scroll to the spacer above the sentinel so the last message
-      // sits just above the input area, not at the viewport bottom.
-      messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" })
+      const spacer = messagesEndRef.current
+      if (spacer) {
+        spacer.scrollIntoView({ behavior: "auto", block: "end" })
+      }
       setShowScrollButton(false)
     } else {
       setShowScrollButton(true)
     }
   }, [streamingDisplay, streamingThinking, activeMessages.length, streamingBlocks])
-
-  // Track whether the user is near the bottom via IntersectionObserver.
-  // Uses a ref as well as state so downstream effects can read the
-  // freshest value without stale-closure issues.
-  // Has a stable dependency list (only changes when the session changes)
-  // to avoid churn during heavy streaming.
-  useEffect(() => {
-    const sentinel = bottomSentinelRef.current
-    const container = scrollContainerRef.current
-    if (!sentinel || !container) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries[0]?.isIntersecting ?? false
-        isNearBottomRef.current = visible
-        setIsNearBottom(visible)
-        if (visible) setShowScrollButton(false)
-      },
-      { root: container, threshold: 0, rootMargin: "400px 0px 0px 0px" },
-    )
-
-    observer.observe(sentinel)
-    return () => observer.disconnect()
-  }, [activeSessionId])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
@@ -255,6 +239,7 @@ export default function ChatPage() {
 
   const loadModelInfo = async (sessionId?: string) => {
     try {
+      setModelLoading(true)
       console.log("[ModelSelector] Loading model info" + (sessionId ? ` for session ${sessionId.slice(0, 16)}...` : ""))
       const info = await fetchModelInfo(sessionId)
       console.log("[ModelSelector] Received:", info.current_model, "on", info.current_provider_label)

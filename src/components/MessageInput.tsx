@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent, type DragEvent } from "react"
 import { FileUp, Loader2, SendHorizontal, Sparkles, X, BrainCircuit, Check, ChevronDown, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -46,6 +46,73 @@ export default function MessageInput({
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const modelButtonRef = useRef<HTMLButtonElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const dragCounterRef = useRef(0)
+
+  // Drag-and-drop file handling
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDragEnter = (e: DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current += 1
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true)
+    }
+  }
+
+  const handleDragLeave = (e: DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current -= 1
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0
+      setIsDragging(false)
+    }
+  }
+
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    dragCounterRef.current = 0
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      setFiles((current) => [...current, ...Array.from(e.dataTransfer.files)])
+    }
+  }
+
+  // Paste handler: capture pasted images from clipboard
+  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardItems = e.clipboardData.items
+    if (!clipboardItems) return
+
+    const imageFiles: File[] = []
+    for (let i = 0; i < clipboardItems.length; i++) {
+      const item = clipboardItems[i]
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile()
+        if (file) {
+          // Give pasted images a meaningful name with timestamp
+          const ext = file.name?.split(".").pop() || "png"
+          const renamed = new File(
+            [file],
+            `pasted-image-${Date.now()}.${ext}`,
+            { type: file.type },
+          )
+          imageFiles.push(renamed)
+        }
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault() // prevent pasting raw image data into textarea
+      setFiles((current) => [...current, ...imageFiles])
+    }
+  }
 
   useEffect(() => {
     if (!loading) {
@@ -116,7 +183,25 @@ export default function MessageInput({
     }))
 
   return (
-    <div className="border-t border-border/70 bg-background/95 px-3 py-3 backdrop-blur">
+    <div
+      className={cn(
+        "border-t border-border/70 bg-background/95 px-3 py-3 backdrop-blur relative",
+        isDragging && "ring-2 ring-primary/50 ring-offset-2 ring-offset-background",
+      )}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drop zone overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-2 text-sm text-primary">
+            <FileUp className="size-8" />
+            <span className="font-medium">Drop files here</span>
+          </div>
+        </div>
+      )}
       <div className="mx-auto max-w-3xl">
         <div className="rounded-2xl border border-border/80 bg-card px-3 py-2.5 shadow-lg shadow-black/5">
           {files.length > 0 && (
@@ -144,6 +229,7 @@ export default function MessageInput({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder="Write a message..."
             disabled={loading && !isStreaming}
             rows={1}

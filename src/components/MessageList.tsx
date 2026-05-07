@@ -384,12 +384,12 @@ function ImageViewer({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <button type="button" className="group relative cursor-pointer overflow-hidden rounded-xl">
+        <button type="button" className="group relative inline-block cursor-pointer overflow-hidden rounded-xl">
           <div className="overflow-hidden rounded-xl">
             <img
               src={src}
               alt={alt}
-              className="max-h-48 w-full object-contain bg-muted/30 transition-transform duration-300 ease-out group-hover:scale-[1.05]"
+              className="max-h-48 object-contain bg-muted/30 transition-transform duration-300 ease-out group-hover:scale-[1.05]"
             />
           </div>
           <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-300 group-hover:bg-black/20">
@@ -538,42 +538,41 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
 }) {
   const [open, setOpen] = useState(streaming || !!thinking)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const sentinelRef = useRef<HTMLDivElement>(null)
   const [isNearBottom, setIsNearBottom] = useState(true)
+  const isNearBottomRef = useRef(true)
 
   // Keep open while streaming new content
   useEffect(() => {
     if (streaming) setOpen(true)
   }, [streaming])
 
-  // Auto-scroll to bottom when new thinking arrives, unless
-  // the user has manually scrolled up
+  // Scroll event listener on the thinking container — more responsive
+  // than IntersectionObserver for rapid content expansion (e.g. when the
+  // reasoning box first opens and floods in text all at once).
   useEffect(() => {
-    if (!open || !scrollRef.current || !isNearBottom) return
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [thinking, open, isNearBottom, blocks?.length])
-
-  // IntersectionObserver on the sentinel to detect
-  // whether the user is scrolled to the bottom of the thinking box
-  useEffect(() => {
-    const sentinel = sentinelRef.current
-    const root = scrollRef.current
-    if (!sentinel || !root || !open) {
+    const el = scrollRef.current
+    if (!el || !open) {
+      isNearBottomRef.current = true
       setIsNearBottom(true)
       return
     }
 
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        const visible = entry?.isIntersecting ?? false
-        setIsNearBottom(visible)
-      },
-      { root, threshold: 0.05 },
-    )
-
-    observer.observe(sentinel)
-    return () => observer.disconnect()
+    const handler = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8
+      isNearBottomRef.current = atBottom
+      setIsNearBottom(atBottom)
+    }
+    el.addEventListener("scroll", handler, { passive: true })
+    return () => el.removeEventListener("scroll", handler)
   }, [open])
+
+  // Auto-scroll to bottom when new thinking arrives, unless the user
+  // has manually scrolled up. Reads the ref directly to avoid stale
+  // closures in the isNearBottom check.
+  useEffect(() => {
+    if (!open || !scrollRef.current || !isNearBottomRef.current) return
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [thinking, open, blocks?.length])
 
   // Filter for tool_call interactions
   const toolCalls = interactions?.filter((i) => i.kind === "tool_call") || []
@@ -631,7 +630,6 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
               </div>
             )
           })}
-          <div ref={sentinelRef} className="h-px" />
         </div>
       </div>
     </div>
