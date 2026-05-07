@@ -8,6 +8,7 @@ import MessageInput from "./MessageInput"
 import type { ChatInteraction, ChatMessage, Session, StreamEvent } from "../api/client"
 import {
   sendMessage,
+  sendCommand,
   fetchSessions,
   fetchMessages,
   deleteSession as apiDeleteSession,
@@ -78,10 +79,17 @@ export default function ChatPage() {
   // Streaming blocks: chronologically ordered segments of reasoning text + tool calls
   const streamingBlocksRef = useRef<any[]>([])
   const [streamingBlocks, setStreamingBlocks] = useState<any[]>([])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const isStreamingRef = useRef(false)
+  // Keep the ref in sync with the React state for re-render-triggering checks
+  const updateStreamingState = useCallback((val: boolean) => {
+    console.log("[STREAMSTATE] updateStreamingState:", val, "| loading:", loading, "| textarea value length:", input.length)
+    isStreamingRef.current = val
+    setIsStreaming(val)
+  }, [loading, input.length])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bottomSentinelRef = useRef<HTMLDivElement>(null)
-  const isStreamingRef = useRef(false)
   const [isNearBottom, setIsNearBottom] = useState(true)
   const isNearBottomRef = useRef(true)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -330,10 +338,13 @@ export default function ChatPage() {
 
   const handleStreamEvent = (event: StreamEvent) => {
     const content = event.content || ""
+    if (event.type === "done") {
+      console.log("[STREAM] Done event — stream finished")
+    }
     if (event.message_id) {
       streamingMessageIdRef.current = event.message_id
     }
-    console.log("[STREAM] event type:", event.type, "content len:", content.length, "interaction kind:", event.interaction?.kind, "tool:", (event as any).tool)
+
     switch (event.type) {
       case "response":
         streamingContentRef.current += content
@@ -406,11 +417,43 @@ export default function ChatPage() {
 
   const handleSend = useCallback(async (files: File[] = []) => {
     const text = input.trim()
-    if ((!text && files.length === 0) || loading || isStreamingRef.current) return
+    if ((!text && files.length === 0) || (loading && !isStreamingRef.current)) return
+
+    // If the agent is currently streaming, send as a /steer command
+    if (isStreamingRef.current) {
+      if (!text) return
+
+      const currentSessionId = activeSessionId
+      if (!currentSessionId) return
+
+      console.log("[STEER] Sending steer command:", text.slice(0, 60))
+      const steerText = `/steer ${text}`
+      setInput("")
+
+      // Add the user message to the UI immediately
+      const steerMessage: ChatMessage = {
+        role: "user",
+        content: text,
+        id: generateMessageId(),
+        timestamp: new Date().toISOString(),
+      }
+      const existingMessages = messagesBySession.get(currentSessionId) || []
+      messagesBySession.set(currentSessionId, [...existingMessages, steerMessage])
+      forceUpdate()
+
+      // Fire-and-forget — no new SSE stream, the existing stream continues
+      console.log("[STEER] Calling sendCommand with:", steerText.slice(0, 60))
+      await sendCommand(steerText, currentSessionId).catch((err) => {
+        console.log("[STEER] sendCommand error:", err)
+        setError(err instanceof Error ? err.message : "Steer failed")
+      })
+      console.log("[STEER] sendCommand completed")
+      return
+    }
 
     setLoading(true)
     setError(null)
-    isStreamingRef.current = true
+    updateStreamingState(true)
 
     streamingContentRef.current = ""
     streamingThinkingRef.current = ""
@@ -489,7 +532,7 @@ export default function ChatPage() {
         // the streaming placeholder (id: "streaming") is still appended to
         // allDisplayMessages because isStreamingRef is still true, creating
         // a duplicate assistant message.
-        isStreamingRef.current = false
+        updateStreamingState(false)
         setLoading(false)
         setStreamingDisplay("")
         setStreamingThinking("")
@@ -501,7 +544,7 @@ export default function ChatPage() {
 
         forceUpdate()
       } else {
-        isStreamingRef.current = false
+        updateStreamingState(false)
         setLoading(false)
         setStreamingDisplay("")
         setStreamingThinking("")
@@ -535,9 +578,23 @@ export default function ChatPage() {
       setError(errorMsg)
     } finally {
       setLoading(false)
-      isStreamingRef.current = false
+      updateStreamingState(false)
     }
   }, [input, loading, activeSessionId, forceUpdate])
+
+  const handleStop = useCallback(async () => {
+    const sessionId = activeSessionId
+    if (!sessionId || !isStreamingRef.current) {
+      console.log("[STOP] Guard blocked — sessionId:", !!sessionId, "isStreaming:", isStreamingRef.current)
+      return
+    }
+    console.log("[STOP] Sending /stop")
+    await sendCommand("/stop", sessionId).catch((err) => {
+      console.log("[STOP] sendCommand error:", err)
+      setError(err instanceof Error ? err.message : "Stop failed")
+    })
+    console.log("[STOP] sendCommand completed")
+  }, [activeSessionId])
 
   const updateInteractionEverywhere = useCallback((interaction: ChatInteraction) => {
     if (!activeSessionId) return
@@ -773,6 +830,8 @@ export default function ChatPage() {
           onChange={setInput}
           onSend={handleSend}
           loading={loading}
+          isStreaming={isStreaming}
+          onStop={handleStop}
           currentModel={currentModel}
           currentProvider={currentProvider}
           providers={providers}

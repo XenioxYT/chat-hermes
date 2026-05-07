@@ -411,6 +411,38 @@ export async function sendMessage(
 }
 
 /**
+ * Send a command message without opening an SSE stream.
+ *
+ * Designed for steer/stop commands sent while the agent is already
+ * streaming a response.  The message is POSTed to /api/send but the
+ * SSE response body is discarded — the command is processed by the
+ * gateway immediately and the existing SSE stream handles the rest.
+ */
+export async function sendCommand(
+  message: string,
+  sessionId?: string,
+): Promise<void> {
+  const token = getToken()
+  if (!token) throw new ChatError("Not authenticated", 401)
+
+  console.log("[SENDCMD] POST /api/command:", JSON.stringify({ message: message.slice(0, 80), session_id: sessionId }))
+  const res = await fetch(`${API_BASE}/api/command`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message, session_id: sessionId }),
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    console.log("[SENDCMD] Response:", res.status, body.slice(0, 200))
+    throw new ChatError(`sendCommand failed: ${res.status} ${body.slice(0, 100)}`, res.status)
+  }
+  console.log("[SENDCMD] OK —", res.status)
+}
+
+/**
  * Fetch the list of all conversation sessions.
  */
 export async function fetchSessions(): Promise<Session[]> {

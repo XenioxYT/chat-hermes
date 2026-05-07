@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react"
-import { FileUp, Loader2, SendHorizontal, Sparkles, X, BrainCircuit, Check, ChevronDown } from "lucide-react"
+import { FileUp, Loader2, SendHorizontal, Sparkles, X, BrainCircuit, Check, ChevronDown, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -16,6 +16,8 @@ interface MessageInputProps {
   onChange: (value: string) => void
   onSend: (files?: File[]) => void
   loading: boolean
+  isStreaming: boolean
+  onStop: () => void
   currentModel?: string
   currentProvider?: string
   providers?: ModelProvider[]
@@ -29,6 +31,8 @@ export default function MessageInput({
   onChange,
   onSend,
   loading,
+  isStreaming,
+  onStop,
   currentModel = "",
   currentProvider = "",
   providers = [],
@@ -80,7 +84,9 @@ export default function MessageInput({
     setFiles([])
   }
 
-  const canSend = (value.trim().length > 0 || files.length > 0) && !loading
+  const canSend = (value.trim().length > 0 || files.length > 0) && (!loading || isStreaming)
+  const canStop = isStreaming
+  const hasTextOrFiles = value.trim().length > 0 || files.length > 0
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -139,7 +145,7 @@ export default function MessageInput({
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Write a message..."
-            disabled={loading}
+            disabled={loading && !isStreaming}
             rows={1}
             className="max-h-48 min-h-10 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-50"
           />
@@ -281,19 +287,59 @@ export default function MessageInput({
                 </div>
               ) : null}
 
-              <Button onClick={handleSend} disabled={!canSend} size="sm" className="rounded-lg px-4">
-                {loading ? (
-                  <>
-                    <Loader2 className="size-3.5 animate-spin" />
-                    Sending
-                  </>
-                ) : (
-                  <>
+              {isStreaming && hasTextOrFiles ? (
+                <>
+                  {/* Steer button — send message as steer command */}
+                  <Button
+                    onClick={handleSend}
+                    disabled={!canSend}
+                    size="sm"
+                    className="rounded-lg px-4"
+                  >
                     Send
                     <SendHorizontal className="size-3.5" />
-                  </>
-                )}
-              </Button>
+                  </Button>
+                  {/* Stop button — kill the running agent */}
+                  <Button
+                    onClick={onStop}
+                    size="sm"
+                    className="rounded-lg px-4 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    <Square className="size-3.5 fill-current" />
+                    Stop
+                  </Button>
+                </>
+              ) : isStreaming ? (
+                /* Streaming, no text — show only the stop button */
+                <Button
+                  onClick={onStop}
+                  size="sm"
+                  className="rounded-lg px-4 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  <Square className="size-3.5 fill-current" />
+                  Stop
+                </Button>
+              ) : (
+                /* Not streaming — normal send button */
+                <Button
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  size="sm"
+                  className="rounded-lg px-4"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      Sending
+                    </>
+                  ) : (
+                    <>
+                      Send
+                      <SendHorizontal className="size-3.5" />
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           </div>
         </div>
