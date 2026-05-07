@@ -163,7 +163,6 @@ html {
 
 .scroll-container {
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
   scroll-padding-bottom: 24px;
   -webkit-overflow-scrolling: touch;
 }
