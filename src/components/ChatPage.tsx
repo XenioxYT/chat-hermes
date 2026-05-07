@@ -84,10 +84,9 @@ export default function ChatPage() {
   const isStreamingRef = useRef(false)
   // Keep the ref in sync with the React state for re-render-triggering checks
   const updateStreamingState = useCallback((val: boolean) => {
-    console.log("[STREAMSTATE] updateStreamingState:", val, "| loading:", loading, "| textarea value length:", input.length)
     isStreamingRef.current = val
     setIsStreaming(val)
-  }, [loading, input.length])
+  }, [])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [sidebarArtifact, setSidebarArtifact] = useState<{ code: string; language: string } | null>(null)
 
@@ -163,9 +162,10 @@ export default function ChatPage() {
       messagesBySession.set(sessionId, messages)
       forceUpdate()
       // Scroll to bottom once messages are rendered
+      console.log("[SCROLL] loadMessages: loaded", messages.length, "msgs, calling onContent")
       requestAnimationFrame(() => onContent())
     } catch (err) {
-      console.error("Failed to load messages:", err)
+      console.error("[SCROLL] Failed to load messages:", err)
       setError("Failed to load conversation messages")
     }
   }
@@ -173,9 +173,7 @@ export default function ChatPage() {
   const loadModelInfo = async (sessionId?: string) => {
     try {
       setModelLoading(true)
-      console.log("[ModelSelector] Loading model info" + (sessionId ? ` for session ${sessionId.slice(0, 16)}...` : ""))
       const info = await fetchModelInfo(sessionId)
-      console.log("[ModelSelector] Received:", info.current_model, "on", info.current_provider_label)
       setCurrentModel(info.current_model)
       setCurrentProvider(info.current_provider)
       setCurrentProviderLabel(info.current_provider_label)
@@ -195,6 +193,7 @@ export default function ChatPage() {
       loadMessages(sessionId)
     } else {
       // Messages already cached — scroll to bottom after re-render
+      console.log("[SCROLL] handleSelectSession: cached msgs, calling onContent (msgs:", messagesBySession.get(sessionId)?.length, ")")
       requestAnimationFrame(() => onContent())
     }
     // Update URL hash with session slug
@@ -259,8 +258,8 @@ export default function ChatPage() {
 
   const handleStreamEvent = (event: StreamEvent) => {
     const content = event.content || ""
-    if (event.type === "done") {
-      console.log("[STREAM] Done event — stream finished")
+    if (event.type !== "thinking" && event.type !== "reasoning") {
+      console.log("[STREAM] event:", event.type, "contentLen:", content.length, "interaction:", event.interaction?.kind)
     }
     if (event.message_id) {
       streamingMessageIdRef.current = event.message_id
@@ -353,7 +352,6 @@ export default function ChatPage() {
       const currentSessionId = activeSessionId
       if (!currentSessionId) return
 
-      console.log("[STEER] Sending steer command:", text.slice(0, 60))
       const steerText = `/steer ${text}`
       setInput("")
 
@@ -368,16 +366,14 @@ export default function ChatPage() {
       messagesBySession.set(currentSessionId, [...existingMessages, steerMessage])
       forceUpdate()
 
-      // Scroll to show the steer message
+      console.log("[SCROLL] steer: calling onContent after adding steer msg")
       onContent()
 
       // Fire-and-forget — no new SSE stream, the existing stream continues
-      console.log("[STEER] Calling sendCommand with:", steerText.slice(0, 60))
       await sendCommand(steerText, currentSessionId).catch((err) => {
-        console.log("[STEER] sendCommand error:", err)
+        console.error("[STEER] sendCommand error:", err)
         setError(err instanceof Error ? err.message : "Steer failed")
       })
-      console.log("[STEER] sendCommand completed")
       return
     }
 
@@ -424,6 +420,7 @@ export default function ChatPage() {
     setInput("")
 
     // Scroll to show the user's message immediately after sending
+    console.log("[SCROLL] handleSend: user msg sent, calling onContent")
     onContent()
 
     try {
@@ -511,15 +508,12 @@ export default function ChatPage() {
   const handleStop = useCallback(async () => {
     const sessionId = activeSessionId
     if (!sessionId || !isStreamingRef.current) {
-      console.log("[STOP] Guard blocked — sessionId:", !!sessionId, "isStreaming:", isStreamingRef.current)
       return
     }
-    console.log("[STOP] Sending /stop")
     await sendCommand("/stop", sessionId).catch((err) => {
-      console.log("[STOP] sendCommand error:", err)
+      console.error("[STOP] sendCommand error:", err)
       setError(err instanceof Error ? err.message : "Stop failed")
     })
-    console.log("[STOP] sendCommand completed")
   }, [activeSessionId])
 
   const updateInteractionEverywhere = useCallback((interaction: ChatInteraction) => {
@@ -580,11 +574,9 @@ export default function ChatPage() {
   }
 
   const handleModelChange = useCallback(async (provider: string, model: string) => {
-    console.log("[ModelSelector] Switching to:", model, "on", provider, "session:", activeSessionId?.slice(0, 16))
     setModelChanging(true)
     try {
       const result = await setModel(provider, model, activeSessionId || undefined)
-      console.log("[ModelSelector] Switch result:", result)
 
       // Update model state from POST response
       setCurrentModel(result.model)
