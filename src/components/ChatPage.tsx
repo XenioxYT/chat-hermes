@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils"
 import SessionSidebar from "./SessionSidebar"
 import MessageList from "./MessageList"
 import MessageInput from "./MessageInput"
+import { useAutoScroll } from "../hooks/useAutoScroll"
 import type { ChatInteraction, ChatMessage, Session, StreamEvent } from "../api/client"
 import {
   sendMessage,
@@ -88,26 +89,19 @@ export default function ChatPage() {
     setIsStreaming(val)
   }, [loading, input.length])
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const bottomSentinelRef = useRef<HTMLDivElement>(null)
-  const [isNearBottom, setIsNearBottom] = useState(true)
-  const isNearBottomRef = useRef(true)
-  const [showScrollButton, setShowScrollButton] = useState(false)
-  const contentVersionRef = useRef(0)
   const [sidebarArtifact, setSidebarArtifact] = useState<{ code: string; language: string } | null>(null)
 
   const user = getStoredUser()
 
-  // Scroll to bottom when messages load or session switches.
-  // Uses direct scrollTop assignment to bypass CSS `scroll-behavior: smooth`
-  // so the initial scroll is instant, not animated from the top of the page.
+  // Single auto-scroll hook — manages the scroll container ref, sticky tracking,
+  // banner state, onContent() for direct scroll-on-change, and jumpDown()
+  const { scrollRef: scrollContainerRef, showBanner, onContent, clearBanner, jumpDown } = useAutoScroll()
+
+  // Initial scroll on session load: using scrollTop directly to bypass CSS smooth scroll
   const initialScrollDoneRef = useRef(false)
   useEffect(() => {
     if (activeSessionId && activeMessages.length > 0 && !initialScrollDoneRef.current) {
       initialScrollDoneRef.current = true
-      // Use useLayoutEffect equiv: schedule before paint. Double rAF to
-      // ensure layout is settled. Set scrollTop directly — this bypasses
-      // CSS scroll-behavior: smooth entirely.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           const container = scrollContainerRef.current
@@ -173,49 +167,7 @@ export default function ChatPage() {
     localStorage.setItem("webchat_theme", darkMode ? "dark" : "light")
   }, [darkMode])
 
-  // Scroll event listener: tracks whether the user is near the bottom
-  // of the chat. Updates `isNearBottomRef` synchronously on every scroll
-  // event — more responsive than IntersectionObserver for rapid content
-  // expansion (e.g. reasoning box opening). Tolerates up to 8px of
-  // bottom-scroll distance as "at bottom".
-  useEffect(() => {
-    const el = scrollContainerRef.current
-    if (!el) return
-
-    const handler = () => {
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8
-      isNearBottomRef.current = atBottom
-      setIsNearBottom(atBottom)
-      if (atBottom) setShowScrollButton(false)
-    }
-    el.addEventListener("scroll", handler, { passive: true })
-    return () => el.removeEventListener("scroll", handler)
-  }, [activeSessionId])
-
-  // Auto-scroll to bottom when new content arrives.
-  // Reads isNearBottomRef.current (synchronous ref, no stale closure)
-  // and either scrolls the spacer into view or reveals the scroll button.
-  useEffect(() => {
-    contentVersionRef.current += 1
-
-    const isNear = isNearBottomRef.current
-    if (isNear) {
-      const spacer = messagesEndRef.current
-      if (spacer) {
-        spacer.scrollIntoView({ behavior: "auto", block: "end" })
-      }
-      setShowScrollButton(false)
-    } else {
-      setShowScrollButton(true)
-    }
-  }, [streamingDisplay, streamingThinking, activeMessages.length, streamingBlocks])
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-    isNearBottomRef.current = true
-    setIsNearBottom(true)
-    setShowScrollButton(false)
-  }
+  const scrollToBottom = jumpDown
 
   const loadSessions = async () => {
     try {
@@ -231,6 +183,8 @@ export default function ChatPage() {
       const messages = await fetchMessages(sessionId)
       messagesBySession.set(sessionId, messages)
       forceUpdate()
+      // Scroll to bottom once messages are rendered
+      requestAnimationFrame(() => onContent())
     } catch (err) {
       console.error("Failed to load messages:", err)
       setError("Failed to load conversation messages")
@@ -334,10 +288,12 @@ export default function ChatPage() {
       case "response":
         streamingContentRef.current += content
         setStreamingDisplay(streamingContentRef.current)
+        onContent()
         break
       case "replace":
         streamingContentRef.current = content
         setStreamingDisplay(streamingContentRef.current)
+        onContent()
         break
       case "thinking":
       case "reasoning":
@@ -353,6 +309,7 @@ export default function ChatPage() {
           }
           setStreamingBlocks([...blocks])
         }
+        onContent()
         break
       case "interaction":
         if (event.interaction) {
@@ -367,6 +324,7 @@ export default function ChatPage() {
           if (event.interaction.kind === "tool_call") {
             streamingBlocksRef.current.push({ type: "tool_call", interaction: event.interaction })
             setStreamingBlocks([...streamingBlocksRef.current])
+            onContent()
           }
         }
         break
@@ -389,6 +347,7 @@ export default function ChatPage() {
           if (path) {
             streamingContentRef.current += `\nMEDIA:${path}`
             setStreamingDisplay(streamingContentRef.current)
+            onContent()
           }
         }
         break
@@ -396,6 +355,7 @@ export default function ChatPage() {
         if (content) setError(content)
         break
       case "done":
+        clearBanner()
         break
     }
   }
@@ -425,6 +385,9 @@ export default function ChatPage() {
       const existingMessages = messagesBySession.get(currentSessionId) || []
       messagesBySession.set(currentSessionId, [...existingMessages, steerMessage])
       forceUpdate()
+
+      // Scroll to show the steer message
+      onContent()
 
       // Fire-and-forget — no new SSE stream, the existing stream continues
       console.log("[STEER] Calling sendCommand with:", steerText.slice(0, 60))
@@ -479,11 +442,7 @@ export default function ChatPage() {
     setInput("")
 
     // Scroll to show the user's message immediately after sending
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ block: "end" })
-      })
-    })
+    onContent()
 
     try {
       const returnedSessionId = await sendMessage(
@@ -761,14 +720,13 @@ export default function ChatPage() {
                   onArtifactSidebar={handleArtifactSidebar}
                 />
                 <div ref={messagesEndRef} className="h-4" />
-                <div ref={bottomSentinelRef} className="h-px" />
               </>
             )}
           </div>
 
-          {showScrollButton && activeSessionId && (
+          {showBanner && activeSessionId && (
             <AnimatePresence>
-              {showScrollButton && (
+              {showBanner && (
                 <motion.div
                   initial={{ opacity: 0, y: 16, scale: 0.9 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -778,7 +736,7 @@ export default function ChatPage() {
                 >
                   <button
                     type="button"
-                    onClick={scrollToBottom}
+                    onClick={jumpDown}
                     className={cn(
                       "flex items-center gap-1.5 rounded-full border border-border/60 bg-card/90 px-4 py-2 text-xs",
                       "text-muted-foreground shadow-lg backdrop-blur-md transition-all",
