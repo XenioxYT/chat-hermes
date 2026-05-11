@@ -538,11 +538,39 @@ function truncateHead(text: string, maxLen: number): string {
   return slice + "..."
 }
 
+/** Render **bold** and *italic* markdown as HTML (no other markdown). */
+function renderInlineMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+}
+
+/**
+ * Compute the total length of all text blocks in the blocks array.
+ */
+function totalTextBlockLength(blocks: any[]): number {
+  if (!blocks) return 0
+  return blocks
+    .filter((b) => b.type === "text")
+    .reduce((sum, b) => sum + (b.content?.length || 0), 0)
+}
+
 function extractThinkingLabel(thinking: string, blocks: any[]): string {
-  // If there's a tool call, show that
+  // Check if there's new thinking content that arrived after the last
+  // tool_call. If so, use that instead of the stale tool_call label.
   if (blocks && blocks.length > 0) {
     const last = blocks[blocks.length - 1]
     if (last.type === "tool_call") {
+      const textContentLen = totalTextBlockLength(blocks)
+      if (thinking && thinking.length > textContentLen) {
+        // New thinking arrived after this tool call — fall through to
+        // paragraph logic with the new content only.
+        const newContent = thinking.slice(textContentLen)
+        const paragraphs = newContent.split(/\n\n+/).filter(Boolean)
+        const lastParagraph = paragraphs[paragraphs.length - 1] || newContent
+        return truncateHead(lastParagraph.trim(), 75)
+      }
+      // No new thinking — show tool call label
       const toolName = last.interaction?.title || `Tool: ${last.interaction?.kind || "unknown"}`
       const args = last.interaction?.content || ""
       if (args) {
@@ -633,9 +661,13 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
         aria-expanded={open}
       >
         <Sparkles className={cn("size-4 shrink-0", streaming && "text-primary")} />
-        <span className={cn("min-w-0 flex-1 truncate", streaming && "thinking-gradient")}>
-          {streaming ? extractThinkingLabel(thinking, blocks) : summary}
-        </span>
+        <span className={cn("min-w-0 flex-1 truncate", streaming && "thinking-gradient")}
+          dangerouslySetInnerHTML={{
+            __html: streaming
+              ? renderInlineMarkdown(extractThinkingLabel(thinking, blocks))
+              : renderInlineMarkdown(summary),
+          }}
+        />
         <ChevronDown className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "-rotate-90")} />
       </button>
       <div className={cn("grid transition-all duration-200", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
