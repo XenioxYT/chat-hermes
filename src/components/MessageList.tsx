@@ -595,7 +595,7 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
   interactions?: ChatInteraction[]
   blocks?: any[]
 }) {
-  const [open, setOpen] = useState(streaming || !!thinking)
+  const [open, setOpen] = useState(false)
 
   // Auto-scroll for the thinking container — same pattern as main chat
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -667,7 +667,7 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
           <div className="min-h-0 overflow-hidden">
             <div
               ref={scrollRef}
-              className="max-h-[50vh] overflow-y-auto overscroll-contain border-t border-border/70 px-3 py-3 font-mono text-xs leading-5 text-muted-foreground"
+              className="max-h-[33vh] overflow-y-auto overscroll-contain border-t border-border/70 px-3 py-3 font-mono text-xs leading-5 text-muted-foreground"
             >
           {segments.map((seg, i) => {
             if (seg.type === "text") {
