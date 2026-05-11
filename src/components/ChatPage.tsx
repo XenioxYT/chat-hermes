@@ -277,7 +277,11 @@ export default function ChatPage() {
     if (event.type === "done") {
       console.log("[FINALIZE] done event received, session:", event.session_id, "msgId:", event.message_id, "finalizedRef:", finalizedRef.current)
     }
-    if (event.message_id) {
+    // Set message_id from the first event that has one, and from the
+    // "done" event (gateway's authoritative final message_id).
+    // Never change it mid-stream — that would change the React key of
+    // the streaming placeholder, causing a remount and resetting state.
+    if (event.message_id && (!streamingMessageIdRef.current || event.type === "done")) {
       streamingMessageIdRef.current = event.message_id
     }
 

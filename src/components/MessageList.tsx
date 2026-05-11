@@ -559,48 +559,47 @@ function extractThinkingLabel(thinking: string, blocks: any[]): string {
   // Debug: track label decisions
   const blockTypes = blocks?.map((b) => b.type).join(",") || "none"
 
-  // Check if there's new thinking content that arrived after the last
-  // tool_call. If so, use that instead of the stale tool_call label.
+  // 1. If the last block is a tool_call with no new thinking → show tool call label
   if (blocks && blocks.length > 0) {
     const last = blocks[blocks.length - 1]
     if (last.type === "tool_call") {
       const textContentLen = totalTextBlockLength(blocks)
       console.log("[LABEL] tool_call last block | blocks:", blockTypes, "textContentLen:", textContentLen, "thinkingLen:", thinking?.length || 0, "hasNewThinking:", thinking?.length > textContentLen)
-      if (thinking && thinking.length > textContentLen) {
-        // New thinking arrived after this tool call — fall through to
-        // paragraph logic with the new content only.
-        const newContent = thinking.slice(textContentLen)
-        const paragraphs = newContent.split(/\n+/).filter(Boolean)
-        const lastParagraph = paragraphs[paragraphs.length - 1] || newContent
-        const result = truncateHead(lastParagraph.trim(), 75)
-        console.log("[LABEL] new thinking after tool_call → paragraph:", result)
-        return result
-      }
-      // No new thinking — show tool call label
-      const toolName = last.interaction?.title || `Tool: ${last.interaction?.kind || "unknown"}`
-      const args = last.interaction?.content || ""
-      if (args) {
-        const combined = `${toolName} ${args}`
-        const result = truncateHead(combined, 75)
+      if (!thinking || thinking.length <= textContentLen) {
+        // No new thinking — show tool call label
+        const toolName = last.interaction?.title || `Tool: ${last.interaction?.kind || "unknown"}`
+        const args = last.interaction?.content || ""
+        const label = args ? `${toolName} ${args}` : toolName
+        const result = truncateHead(label, 75)
         console.log("[LABEL] tool_call label →", result)
         return result
       }
-      const result = truncateHead(toolName, 75)
-      console.log("[LABEL] tool_call label (no args) →", result)
-      return result
+      // New thinking after tool call — fall through to block-based extraction
     }
   }
 
-  // Show the first 75 chars of the last paragraph — updates each time a
-  // new paragraph starts streaming.
-  const text = thinking?.trim() || ""
-  if (text.length === 0) return "Thinking..."
+  // 2. Get the most recent thinking segment from the last text block.
+  //    Text blocks are separated by tool calls, so each one is a distinct
+  //    thinking segment. Using blocks directly avoids the issue of new
+  //    text being appended to the last line of the full thinking string.
+  let source = thinking?.trim() || ""
+  if (blocks) {
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (blocks[i].type === "text" && blocks[i].content?.trim()) {
+        source = blocks[i].content.trim()
+        break
+      }
+    }
+  }
 
-  // Split into paragraphs on any newline, take the last non-empty one
-  const paragraphs = text.split(/\n+/).filter(Boolean)
-  const lastParagraph = paragraphs[paragraphs.length - 1] || text
-  const result = truncateHead(lastParagraph.trim(), 75)
-  console.log("[LABEL] paragraph path | blocks:", blockTypes, "paragraphs:", paragraphs.length, "result:", result)
+  if (!source) return "Thinking..."
+
+  // 3. Show first 75 chars of the last line within that segment.
+  //    Each \n-separated line gives a label update as the model writes.
+  const lines = source.split(/\n+/).filter(Boolean)
+  const lastLine = lines[lines.length - 1] || source
+  const result = truncateHead(lastLine.trim(), 75)
+  console.log("[LABEL] paragraph path | blocks:", blockTypes, "lines:", lines.length, "sourceLen:", source.length, "result:", result)
   return result
 }
 
