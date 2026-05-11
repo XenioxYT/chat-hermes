@@ -23,6 +23,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism"
 import { Copy, Check } from "lucide-react"
 import ArtifactRenderer from "./ArtifactRenderer"
+import MermaidRenderer from "./MermaidRenderer"
 import { cn } from "@/lib/utils"
 
 // Import KaTeX CSS for math rendering
@@ -37,6 +38,22 @@ interface MarkdownRendererProps {
   content: string
   /** Called when an artifact sidebar button is clicked */
   onArtifactSidebar?: (code: string, language: string) => void
+}
+
+function normalizeFenceLanguage(className?: string): string {
+  const match = /language-([^\s]+)/.exec(className || "")
+  return match ? match[1].toLowerCase() : ""
+}
+
+function normalizeArtifactLanguage(language: string): string | null {
+  const normalized = language.replace(/:/g, "-")
+  if (["artifact", "artifact-react", "artifact-tsx", "artifact-jsx", "artifact-shadcn"].includes(normalized)) {
+    return "artifact-react"
+  }
+  if (["artifact-html"].includes(normalized)) {
+    return "artifact-html"
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -59,8 +76,7 @@ function CodeBlock({
   const [copied, setCopied] = useState(false)
 
   // Extract the language from the className (e.g., "language-python")
-  const match = /language-([\w-]+)/.exec(className || "")
-  const language = match ? match[1] : ""
+  const language = normalizeFenceLanguage(className)
   const code = String(children).replace(/\n$/, "")
 
   const handleCopy = async () => {
@@ -350,18 +366,21 @@ export default function MarkdownRenderer({ content, onArtifactSidebar }: Markdow
         // Plugins: GFM adds tables, strikethrough, task lists, etc.
         // Math plugins add $...$ and $$...$$ LaTeX support
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
         components={{
           // Code blocks with syntax highlighting
           code({ className, children, ...props }) {
-            const match = /language-([\w-]+)/.exec(className || "")
-            const language = match ? match[1].toLowerCase() : ""
+            const language = normalizeFenceLanguage(className)
             const code = String(children).replace(/\n$/, "")
-            if (["react", "jsx", "tsx", "artifact", "html"].includes(language)) {
-              return <ArtifactRenderer code={code} language={language === "artifact" ? "tsx" : language} onSidebar={onArtifactSidebar} />
+            if (["mermaid", "flowchart", "diagram"].includes(language)) {
+              return <MermaidRenderer code={code} />
+            }
+            const artifactLanguage = normalizeArtifactLanguage(language)
+            if (artifactLanguage) {
+              return <ArtifactRenderer code={code} language={artifactLanguage} onSidebar={onArtifactSidebar} />
             }
             // Fenced code blocks have a className; inline code doesn't
-            return match ? (
+            return language ? (
               <CodeBlock className={className} {...props}>
                 {children}
               </CodeBlock>

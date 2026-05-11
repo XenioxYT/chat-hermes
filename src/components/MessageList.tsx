@@ -107,18 +107,13 @@ function resolveMediaPath(path: string): string {
   // webchat_uploads/{session}/{filename}
   const uploadMatch = path.match(/^webchat_uploads\/([^/]+)\/(.+)$/)
   if (uploadMatch) {
-    const url = mediaFileUrl(uploadMatch[1], uploadMatch[2])
-    console.log("[MEDIA] resolveMediaPath upload ->", url)
-    return url
+    return mediaFileUrl(uploadMatch[1], uploadMatch[2])
   }
   // Local absolute path
   if (path.startsWith("/")) {
-    const url = localMediaUrl(path)
-    console.log("[MEDIA] resolveMediaPath local ->", url)
-    return url
+    return localMediaUrl(path)
   }
   // Fallback: treat as raw URL
-  console.log("[MEDIA] resolveMediaPath raw ->", path)
   return path
 }
 
@@ -537,8 +532,9 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
   blocks?: any[]
 }) {
   const [open, setOpen] = useState(streaming || !!thinking)
+
+  // Auto-scroll for the thinking container — same pattern as main chat
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [isNearBottom, setIsNearBottom] = useState(true)
   const isNearBottomRef = useRef(true)
 
   // Keep open while streaming new content
@@ -546,33 +542,23 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
     if (streaming) setOpen(true)
   }, [streaming])
 
-  // Scroll event listener on the thinking container — more responsive
-  // than IntersectionObserver for rapid content expansion (e.g. when the
-  // reasoning box first opens and floods in text all at once).
+  // Scroll listener: track if user is near the bottom of the thinking container
   useEffect(() => {
     const el = scrollRef.current
-    if (!el || !open) {
-      isNearBottomRef.current = true
-      setIsNearBottom(true)
-      return
-    }
-
+    if (!el) return
     const handler = () => {
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8
-      isNearBottomRef.current = atBottom
-      setIsNearBottom(atBottom)
+      isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 8
     }
     el.addEventListener("scroll", handler, { passive: true })
     return () => el.removeEventListener("scroll", handler)
-  }, [open])
+  }, [])
 
-  // Auto-scroll to bottom when new thinking arrives, unless the user
-  // has manually scrolled up. Reads the ref directly to avoid stale
-  // closures in the isNearBottom check.
+  // Auto-scroll when new thinking content arrives during streaming
   useEffect(() => {
-    if (!open || !scrollRef.current || !isNearBottomRef.current) return
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [thinking, open, blocks?.length])
+    if (streaming && open && scrollRef.current && isNearBottomRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [thinking, streaming, open])
 
   // Filter for tool_call interactions
   const toolCalls = interactions?.filter((i) => i.kind === "tool_call") || []
@@ -614,8 +600,11 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
         <ChevronDown className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "-rotate-90")} />
       </button>
       <div className={cn("grid transition-all duration-200", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
-        <div className="overflow-hidden">
-          <div ref={scrollRef} className="max-h-80 overflow-auto border-t border-border/70 px-3 py-3 font-mono text-xs leading-5 text-muted-foreground">
+          <div className="min-h-0 overflow-hidden">
+            <div
+              ref={scrollRef}
+              className="max-h-[50vh] overflow-y-auto overscroll-contain border-t border-border/70 px-3 py-3 font-mono text-xs leading-5 text-muted-foreground"
+            >
           {segments.map((seg, i) => {
             if (seg.type === "text") {
               return (
@@ -646,12 +635,8 @@ const InlineMediaRenderer = React.memo(function InlineMediaRenderer({
   onArtifactSidebar,
 }: {
   segments: MediaSegment[]
-  onArtifactSidebar?: (artifact?: { title: string; content: string } | undefined) => void
+  onArtifactSidebar?: (code: string, language: string) => void
 }) {
-  // Only log when there are actual media segments (not every re-render)
-  if (segments.some((s) => s.type === "image" || s.type === "file")) {
-    console.log("[MEDIA] InlineMediaRenderer rendering with media:", segments.filter((s) => s.type !== "text").map((s) => s.type + ":" + (s.path || "").slice(0, 60)))
-  }
   return (
     <>
       {segments.map((seg, idx) => {
@@ -721,9 +706,11 @@ function MessageActions({
 function InteractionPanel({
   interaction,
   onAction,
+  onArtifactSidebar,
 }: {
   interaction: ChatInteraction
   onAction?: (interactionId: string, value: string) => Promise<void> | void
+  onArtifactSidebar?: (code: string, language: string) => void
 }) {
   const [pendingValue, setPendingValue] = useState<string | null>(null)
 
@@ -757,7 +744,7 @@ function InteractionPanel({
       </div>
       {interaction.content && (
         <div className="mb-3 text-sm">
-          <MarkdownRenderer content={interaction.content} />
+          <MarkdownRenderer content={interaction.content} onArtifactSidebar={onArtifactSidebar} />
         </div>
       )}
       <div className="flex flex-wrap gap-2">
@@ -850,15 +837,7 @@ function MessageRow({
   // text don't produce false-positive attachment pills.
   const contentForMedia = useMemo(() => {
     const raw = message.content || ""
-    const { cleaned, strippedCount, strippedLengths } = stripReasoning(raw)
-    console.log(
-      "[MEDIA] Raw content length: %d | Reasoning stripped: %d blocks (%d chars) | After strip: %d chars preview: %s",
-      raw.length,
-      strippedCount,
-      strippedLengths.reduce((a: number, b: number) => a + b, 0),
-      cleaned.length,
-      JSON.stringify(cleaned.slice(0, 200)),
-    )
+    const { cleaned } = stripReasoning(raw)
     return cleaned
   }, [message.content])
   const mediaSegments = useMemo(
@@ -877,10 +856,10 @@ function MessageRow({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
-      className="group flex justify-end px-4 py-4"
+      className="group flex justify-end px-4 py-3"
     >
-      <div className="flex max-w-[70%] flex-col items-end gap-2 sm:max-w-[60%] lg:max-w-[50%]">
-        <div className="rounded-2xl bg-muted px-4 py-3 text-sm leading-6 shadow-sm">
+      <div className="flex max-w-[85%] flex-col items-end gap-2 sm:max-w-[72%]">
+        <div className="rounded-2xl rounded-br-md bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-sm">
           <AttachmentList attachments={message.attachments} />
           <p className="whitespace-pre-wrap break-words">{message.content}</p>
         </div>
@@ -929,6 +908,7 @@ function MessageRow({
                 key={interaction.id}
                 interaction={interaction}
                 onAction={onAction}
+                onArtifactSidebar={onArtifactSidebar}
               />
             ))}
           <div className="mt-2">
@@ -961,7 +941,7 @@ export default React.memo(function MessageList({ messages, onAction, onArtifactS
       <AnimatePresence mode="popLayout">
         {messages.map((msg, idx) => (
           <MessageRow
-            key={idx}
+            key={msg.id || `${msg.role}-${idx}`}
             message={msg}
             onAction={onAction}
             onArtifactSidebar={onArtifactSidebar}

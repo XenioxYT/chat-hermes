@@ -411,6 +411,84 @@ export async function sendMessage(
 }
 
 /**
+ * Attach to an already-running response for a session.
+ *
+ * Returns false when there is no live server-side stream to resume.
+ */
+export async function streamSession(
+  sessionId: string,
+  onEvent?: (event: StreamEvent) => void,
+): Promise<boolean> {
+  const token = getToken()
+  if (!token) {
+    throw new ChatError("Not authenticated", 401)
+  }
+
+  const response = await fetch(
+    `${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/stream`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  )
+
+  if (response.status === 204) {
+    return false
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearToken()
+      throw new ChatError("Session expired. Please log in again.", 401)
+    }
+    throw new ChatError(
+      `Stream attach failed with status ${response.status}`,
+      response.status,
+    )
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new ChatError("Response body is not readable")
+  }
+
+  let buffer = ""
+  const decoder = new TextDecoder()
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split("\n\n")
+      buffer = parts.pop() || ""
+
+      for (const part of parts) {
+        const dataLine = part.trim()
+        if (!dataLine || dataLine.startsWith(":")) continue
+
+        const jsonStr = dataLine.startsWith("data: ")
+          ? dataLine.slice(6)
+          : dataLine
+
+        try {
+          onEvent?.(JSON.parse(jsonStr) as StreamEvent)
+        } catch {
+          console.warn("Failed to parse SSE event:", jsonStr)
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return true
+}
+
+/**
  * Send a command message without opening an SSE stream.
  *
  * Designed for steer/stop commands sent while the agent is already

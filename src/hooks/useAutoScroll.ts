@@ -1,36 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-const LOG_PREFIX = "[SCROLL]"
-
 /**
- * useAutoScroll — a single hook that manages the entire scroll behaviour.
+ * useAutoScroll — manages chat scroll behaviour.
  *
- * Inspired by the working demo pattern:
- *  - Scroll event listener tracks sticky (near-bottom) state via a ref
- *  - `onContent()` uses double requestAnimationFrame so React has fully
- *    flushed DOM updates and the browser has completed layout before we
- *    read scrollHeight. Single rAF was sometimes reading stale values
- *    because React 18's automatic batching delays DOM commits.
- *  - `clearBanner()` dismisses the banner when streaming ends
- *  - `jumpDown()` smoothly scrolls to bottom and re-attaches auto-scroll
+ * Scroll tracking: passive scroll listener with an 8px threshold near-bottom
+ * check, using a synchronous ref (no React state dependency).
  *
- * The 8px threshold handles subpixel rounding.
+ * onContent(): debounced double-rAF pattern — each new call cancels any
+ * pending animation frame from a previous call. This prevents race
+ * conditions during rapid streaming where multiple content chunks arrive
+ * between frames. Only the latest state is read.
+ *
+ * jumpDown(): smooth-scrolls to bottom, then ignores scroll events for
+ * 400ms to prevent the smooth scroll animation from re-setting sticky
+ * to false mid-transition.
  */
 export function useAutoScroll() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const sticky = useRef(true)
   const [showBanner, setShowBanner] = useState(false)
+  const ignoreScrollUntil = useRef(0)
+  const pendingOnContent = useRef<number | null>(null)
 
-  // Scroll listener — fires on every user/programmatic scroll event
+  // Scroll listener — fires on every user/programmatic scroll event,
+  // but is gated by ignoreScrollUntil for smooth-scroll transitions.
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
 
     const handler = () => {
+      if (Date.now() < ignoreScrollUntil.current) return
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 8
-      if (atBottom !== sticky.current) {
-        console.log(LOG_PREFIX, "sticky:", sticky.current, "->", atBottom, "| scrollHeight:", el.scrollHeight, "scrollTop:", el.scrollTop, "clientHeight:", el.clientHeight)
-      }
       sticky.current = atBottom
       if (atBottom) setShowBanner(false)
     }
@@ -38,13 +38,16 @@ export function useAutoScroll() {
     return () => el.removeEventListener("scroll", handler)
   }, [])
 
-  // Called on every content change. Double rAF ensures React flushed and
-  // browser laid out before we read scrollHeight. CSS scroll-behavior was
-  // removed from .scroll-container because Chrome applies it even to
-  // direct scrollTop assignment, causing animated scrolls.
+  // Debounced double-rAF: cancels pending frame if onContent is called
+  // again before the chain completes. Avoids reading stale DOM during
+  // rapid streaming where multiple chunks arrive between animation frames.
   const onContent = useCallback(() => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+    if (pendingOnContent.current !== null) {
+      cancelAnimationFrame(pendingOnContent.current)
+    }
+    pendingOnContent.current = requestAnimationFrame(() => {
+      pendingOnContent.current = requestAnimationFrame(() => {
+        pendingOnContent.current = null
         const el = scrollRef.current
         if (!el) return
         const sh = el.scrollHeight
@@ -62,11 +65,13 @@ export function useAutoScroll() {
     setShowBanner(false)
   }, [])
 
-  // Jump-to-bottom button: smooth scroll + re-attach auto-scroll
+  // Jump-to-bottom: smooth scroll + prevent scroll events from
+  // overriding sticky during the smooth animation (400ms timeout).
   const jumpDown = useCallback(() => {
     const el = scrollRef.current
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
     sticky.current = true
+    ignoreScrollUntil.current = Date.now() + 400
     setShowBanner(false)
   }, [])
 

@@ -9,6 +9,7 @@ import { useAutoScroll } from "../hooks/useAutoScroll"
 import type { ChatInteraction, ChatMessage, Session, StreamEvent } from "../api/client"
 import {
   sendMessage,
+  streamSession,
   sendCommand,
   fetchSessions,
   fetchMessages,
@@ -82,6 +83,7 @@ export default function ChatPage() {
   const [streamingBlocks, setStreamingBlocks] = useState<any[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const isStreamingRef = useRef(false)
+  const resumingStreamsRef = useRef<Set<string>>(new Set())
   // Keep the ref in sync with the React state for re-render-triggering checks
   const updateStreamingState = useCallback((val: boolean) => {
     isStreamingRef.current = val
@@ -98,6 +100,20 @@ export default function ChatPage() {
 
   const forceUpdate = useCallback(() => {
     setRenderKey((k) => k + 1)
+  }, [])
+
+  const resetStreamingBuffers = useCallback(() => {
+    streamingContentRef.current = ""
+    streamingThinkingRef.current = ""
+    streamingInteractionsRef.current = []
+    streamingToolCallsRef.current = []
+    streamingBlocksRef.current = []
+    streamingMessageIdRef.current = ""
+    setStreamingDisplay("")
+    setStreamingThinking("")
+    setStreamingInteractions([])
+    setStreamingToolCalls([])
+    setStreamingBlocks([])
   }, [])
 
   useEffect(() => {
@@ -161,9 +177,8 @@ export default function ChatPage() {
       const messages = await fetchMessages(sessionId)
       messagesBySession.set(sessionId, messages)
       forceUpdate()
-      // Scroll to bottom once messages are rendered
-      console.log("[SCROLL] loadMessages: loaded", messages.length, "msgs, calling onContent")
       requestAnimationFrame(() => onContent())
+      void resumeLiveStream(sessionId)
     } catch (err) {
       console.error("[SCROLL] Failed to load messages:", err)
       setError("Failed to load conversation messages")
@@ -192,8 +207,6 @@ export default function ChatPage() {
     if (!messagesBySession.has(sessionId)) {
       loadMessages(sessionId)
     } else {
-      // Messages already cached — scroll to bottom after re-render
-      console.log("[SCROLL] handleSelectSession: cached msgs, calling onContent (msgs:", messagesBySession.get(sessionId)?.length, ")")
       requestAnimationFrame(() => onContent())
     }
     // Update URL hash with session slug
@@ -341,6 +354,59 @@ export default function ChatPage() {
     }
   }
 
+  async function resumeLiveStream(sessionId: string) {
+    if (isStreamingRef.current || resumingStreamsRef.current.has(sessionId)) return
+
+    resumingStreamsRef.current.add(sessionId)
+    resetStreamingBuffers()
+    setLoading(true)
+    updateStreamingState(true)
+
+    try {
+      const attached = await streamSession(sessionId, handleStreamEvent)
+      if (!attached) return
+
+      const finalContent = streamingContentRef.current
+      const finalThinking = streamingThinkingRef.current
+      const finalInteractions = streamingInteractionsRef.current
+      const finalBlocks = streamingBlocksRef.current
+
+      if (finalContent || finalThinking || finalInteractions.length > 0) {
+        const sessionMessages = messagesBySession.get(sessionId) || []
+        const assistantId = streamingMessageIdRef.current || generateMessageId()
+        const alreadyPresent = sessionMessages.some((message) => message.id === assistantId)
+        if (!alreadyPresent) {
+          messagesBySession.set(sessionId, [
+            ...sessionMessages,
+            {
+              role: "assistant",
+              content: finalContent,
+              thinking: finalThinking,
+              interactions: finalInteractions,
+              blocks: finalBlocks,
+              id: assistantId,
+              timestamp: new Date().toISOString(),
+            },
+          ])
+          updateStreamingState(false)
+          forceUpdate()
+        }
+      }
+
+      await loadSessions()
+    } catch (err) {
+      const errorMsg =
+        err instanceof Error ? err.message : "Failed to resume live response"
+      setError(errorMsg)
+    } finally {
+      resumingStreamsRef.current.delete(sessionId)
+      resetStreamingBuffers()
+      setLoading(false)
+      updateStreamingState(false)
+      clearBanner()
+    }
+  }
+
   const handleSend = useCallback(async (files: File[] = []) => {
     const text = input.trim()
     if ((!text && files.length === 0) || (loading && !isStreamingRef.current)) return
@@ -366,7 +432,6 @@ export default function ChatPage() {
       messagesBySession.set(currentSessionId, [...existingMessages, steerMessage])
       forceUpdate()
 
-      console.log("[SCROLL] steer: calling onContent after adding steer msg")
       onContent()
 
       // Fire-and-forget — no new SSE stream, the existing stream continues
@@ -419,8 +484,6 @@ export default function ChatPage() {
     forceUpdate()
     setInput("")
 
-    // Scroll to show the user's message immediately after sending
-    console.log("[SCROLL] handleSend: user msg sent, calling onContent")
     onContent()
 
     try {
@@ -503,7 +566,7 @@ export default function ChatPage() {
       setLoading(false)
       updateStreamingState(false)
     }
-  }, [input, loading, activeSessionId, forceUpdate])
+  }, [input, loading, activeSessionId, forceUpdate, resetStreamingBuffers])
 
   const handleStop = useCallback(async () => {
     const sessionId = activeSessionId
@@ -667,7 +730,7 @@ export default function ChatPage() {
         </header>
 
         <main ref={scrollContainerRef} className="scroll-container flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-4xl">
+          <div className="mx-auto w-full max-w-3xl">
             {!activeSessionId && !loading && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
