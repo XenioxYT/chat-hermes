@@ -526,8 +526,8 @@ function ToolCallBubble({ interaction }: { interaction: ChatInteraction }) {
  * Rules:
  *  - No blocks + no thinking text → "Thinking..."
  *  - Last block is a tool_call → truncated "[tool_name] [args]" (75 chars)
- *  - Otherwise → last ~75 chars of `thinking` string at word boundary,
- *    showing what the model is currently reasoning about
+ *  - Otherwise → first 75 chars (word boundary) of the *last paragraph*,
+ *    so the label updates each time a new paragraph starts streaming.
  */
 
 function truncateHead(text: string, maxLen: number): string {
@@ -536,13 +536,6 @@ function truncateHead(text: string, maxLen: number): string {
   const lastSpace = slice.lastIndexOf(" ")
   if (lastSpace > 0) return slice.slice(0, lastSpace) + "..."
   return slice + "..."
-}
-
-function truncateTail(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text
-  // Start near the end, then walk forward to a word boundary
-  const start = Math.max(text.lastIndexOf(" ", text.length - maxLen) + 1, 0)
-  return "…" + text.slice(start)
 }
 
 function extractThinkingLabel(thinking: string, blocks: any[]): string {
@@ -560,10 +553,15 @@ function extractThinkingLabel(thinking: string, blocks: any[]): string {
     }
   }
 
-  // Show the tail of the thinking string — always up-to-date during streaming
+  // Show the first 75 chars of the last paragraph — updates each time a
+  // new paragraph starts streaming.
   const text = thinking?.trim() || ""
   if (text.length === 0) return "Thinking..."
-  return truncateTail(text, 75)
+
+  // Split into paragraphs and take the last non-empty one
+  const paragraphs = text.split(/\n\n+/).filter(Boolean)
+  const lastParagraph = paragraphs[paragraphs.length - 1] || text
+  return truncateHead(lastParagraph.trim(), 75)
 }
 
 const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
