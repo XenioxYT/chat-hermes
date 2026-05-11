@@ -83,7 +83,6 @@ export default function ChatPage() {
   const [streamingBlocks, setStreamingBlocks] = useState<any[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const isStreamingRef = useRef(false)
-  const finalizedRef = useRef(false) // prevents double-finalization
   const resumingStreamsRef = useRef<Set<string>>(new Set())
   // Keep the ref in sync with the React state for re-render-triggering checks
   const updateStreamingState = useCallback((val: boolean) => {
@@ -110,7 +109,6 @@ export default function ChatPage() {
     streamingToolCallsRef.current = []
     streamingBlocksRef.current = []
     streamingMessageIdRef.current = ""
-    finalizedRef.current = false
     setStreamingDisplay("")
     setStreamingThinking("")
     setStreamingInteractions([])
@@ -273,15 +271,14 @@ export default function ChatPage() {
 
   const handleStreamEvent = (event: StreamEvent) => {
     const content = event.content || ""
-    // Issue 3 debug: track done/finalization flow
+    // Issue 3 debug: track done event
     if (event.type === "done") {
-      console.log("[FINALIZE] done event received, session:", event.session_id, "msgId:", event.message_id, "finalizedRef:", finalizedRef.current)
+      console.log("[FINALIZE] done event received, session:", event.session_id, "msgId:", event.message_id)
     }
-    // Set message_id from the first event that has one, and from the
-    // "done" event (gateway's authoritative final message_id).
-    // Never change it mid-stream — that would change the React key of
-    // the streaming placeholder, causing a remount and resetting state.
-    if (event.message_id && (!streamingMessageIdRef.current || event.type === "done")) {
+    // Set message_id from the first event that has one, then never
+    // change it. Stable ID means the streaming placeholder and finalized
+    // message share the same React key, preventing a remount flicker.
+    if (event.message_id && !streamingMessageIdRef.current) {
       streamingMessageIdRef.current = event.message_id
     }
 
@@ -357,60 +354,8 @@ export default function ChatPage() {
         break
       case "done":
         clearBanner()
-        if (event.session_id) {
-          finalizeStream(event.session_id)
-        }
         break
     }
-  }
-
-  /** Finalize a streaming session: save the message and end streaming. */
-  function finalizeStream(sessionId: string) {
-    if (finalizedRef.current) {
-      console.log("[FINALIZE] skipped (already finalized)")
-      return
-    }
-    console.log("[FINALIZE] finalizing session:", sessionId, "thinkingLen:", streamingThinkingRef.current.length, "contentLen:", streamingContentRef.current.length, "interactions:", streamingInteractionsRef.current.length, "blocks:", streamingBlocksRef.current.length, "msgId:", streamingMessageIdRef.current)
-    finalizedRef.current = true
-
-    const finalContent = streamingContentRef.current
-    const finalThinking = streamingThinkingRef.current
-    const finalInteractions = streamingInteractionsRef.current
-    const finalBlocks = streamingBlocksRef.current
-
-    if (finalContent || finalThinking || finalInteractions.length > 0) {
-      const sessionMessages = messagesBySession.get(sessionId) || []
-      const assistantId = streamingMessageIdRef.current || generateMessageId()
-      const alreadyPresent = sessionMessages.some((message) => message.id === assistantId)
-      if (!alreadyPresent) {
-        messagesBySession.set(sessionId, [
-          ...sessionMessages,
-          {
-            role: "assistant",
-            content: finalContent,
-            thinking: finalThinking,
-            interactions: finalInteractions,
-            blocks: finalBlocks,
-            id: assistantId,
-            timestamp: new Date().toISOString(),
-          },
-        ])
-      }
-    }
-
-    updateStreamingState(false)
-    setLoading(false)
-    setStreamingDisplay("")
-    setStreamingThinking("")
-    setStreamingInteractions([])
-    setStreamingToolCalls([])
-    streamingContentRef.current = ""
-    streamingThinkingRef.current = ""
-    streamingInteractionsRef.current = []
-    streamingMessageIdRef.current = ""
-    streamingBlocksRef.current = []
-    streamingToolCallsRef.current = []
-    forceUpdate()
   }
 
   async function resumeLiveStream(sessionId: string) {
@@ -425,35 +370,30 @@ export default function ChatPage() {
       const attached = await streamSession(sessionId, handleStreamEvent)
       if (!attached) return
 
-      // Skip finalization if already handled by the "done" event
-      if (finalizedRef.current) {
-        console.log("[FINALIZE] resumeLiveStream: post-stream skip (already finalized via done event)")
-      } else {
-        const finalContent = streamingContentRef.current
-        const finalThinking = streamingThinkingRef.current
-        const finalInteractions = streamingInteractionsRef.current
-        const finalBlocks = streamingBlocksRef.current
+      const finalContent = streamingContentRef.current
+      const finalThinking = streamingThinkingRef.current
+      const finalInteractions = streamingInteractionsRef.current
+      const finalBlocks = streamingBlocksRef.current
 
-        if (finalContent || finalThinking || finalInteractions.length > 0) {
-          const sessionMessages = messagesBySession.get(sessionId) || []
-          const assistantId = streamingMessageIdRef.current || generateMessageId()
-          const alreadyPresent = sessionMessages.some((message) => message.id === assistantId)
-          if (!alreadyPresent) {
-            messagesBySession.set(sessionId, [
-              ...sessionMessages,
-              {
-                role: "assistant",
-                content: finalContent,
-                thinking: finalThinking,
-                interactions: finalInteractions,
-                blocks: finalBlocks,
-                id: assistantId,
-                timestamp: new Date().toISOString(),
-              },
-            ])
-            updateStreamingState(false)
-            forceUpdate()
-          }
+      if (finalContent || finalThinking || finalInteractions.length > 0) {
+        const sessionMessages = messagesBySession.get(sessionId) || []
+        const assistantId = streamingMessageIdRef.current || generateMessageId()
+        const alreadyPresent = sessionMessages.some((message) => message.id === assistantId)
+        if (!alreadyPresent) {
+          messagesBySession.set(sessionId, [
+            ...sessionMessages,
+            {
+              role: "assistant",
+              content: finalContent,
+              thinking: finalThinking,
+              interactions: finalInteractions,
+              blocks: finalBlocks,
+              id: assistantId,
+              timestamp: new Date().toISOString(),
+            },
+          ])
+          updateStreamingState(false)
+          forceUpdate()
         }
       }
 
@@ -562,55 +502,50 @@ export default function ChatPage() {
 
       const finalSessionId = returnedSessionId || currentSessionId || ""
 
-      // Skip finalization if already handled by the "done" event
-      if (finalizedRef.current) {
-        console.log("[FINALIZE] handleSend: post-stream skip (already finalized via done event)")
-      } else {
-        const finalContent = streamingContentRef.current
-        const finalThinking = streamingThinkingRef.current
+      const finalContent = streamingContentRef.current
+      const finalThinking = streamingThinkingRef.current
 
-        if (finalContent || finalThinking || streamingInteractionsRef.current.length > 0) {
-          const sessionMessages = messagesBySession.get(finalSessionId) || []
-          const assistantMessage: ChatMessage = {
-            role: "assistant",
-            content: finalContent,
-            thinking: finalThinking,
-            interactions: streamingInteractionsRef.current,
-            blocks: streamingBlocksRef.current,
-            id: streamingMessageIdRef.current || generateMessageId(),
-            timestamp: new Date().toISOString(),
-          }
-          messagesBySession.set(finalSessionId, [
-            ...sessionMessages,
-            assistantMessage,
-          ])
-
-          // CRITICAL: Clear streaming state BEFORE forceUpdate. If we don't,
-          // the streaming placeholder (id: "streaming") is still appended to
-          // allDisplayMessages because isStreamingRef is still true, creating
-          // a duplicate assistant message.
-          updateStreamingState(false)
-          setLoading(false)
-          setStreamingDisplay("")
-          setStreamingThinking("")
-          streamingContentRef.current = ""
-          streamingThinkingRef.current = ""
-          streamingInteractionsRef.current = []
-          streamingMessageIdRef.current = ""
-          setStreamingInteractions([])
-
-          forceUpdate()
-        } else {
-          updateStreamingState(false)
-          setLoading(false)
-          setStreamingDisplay("")
-          setStreamingThinking("")
-          streamingContentRef.current = ""
-          streamingThinkingRef.current = ""
-          streamingInteractionsRef.current = []
-          streamingMessageIdRef.current = ""
-          setStreamingInteractions([])
+      if (finalContent || finalThinking || streamingInteractionsRef.current.length > 0) {
+        const sessionMessages = messagesBySession.get(finalSessionId) || []
+        const assistantMessage: ChatMessage = {
+          role: "assistant",
+          content: finalContent,
+          thinking: finalThinking,
+          interactions: streamingInteractionsRef.current,
+          blocks: streamingBlocksRef.current,
+          id: streamingMessageIdRef.current || generateMessageId(),
+          timestamp: new Date().toISOString(),
         }
+        messagesBySession.set(finalSessionId, [
+          ...sessionMessages,
+          assistantMessage,
+        ])
+
+        // CRITICAL: Clear streaming state BEFORE forceUpdate. If we don't,
+        // the streaming placeholder (id: "streaming") is still appended to
+        // allDisplayMessages because isStreamingRef is still true, creating
+        // a duplicate assistant message.
+        updateStreamingState(false)
+        setLoading(false)
+        setStreamingDisplay("")
+        setStreamingThinking("")
+        streamingContentRef.current = ""
+        streamingThinkingRef.current = ""
+        streamingInteractionsRef.current = []
+        streamingMessageIdRef.current = ""
+        setStreamingInteractions([])
+
+        forceUpdate()
+      } else {
+        updateStreamingState(false)
+        setLoading(false)
+        setStreamingDisplay("")
+        setStreamingThinking("")
+        streamingContentRef.current = ""
+        streamingThinkingRef.current = ""
+        streamingInteractionsRef.current = []
+        streamingMessageIdRef.current = ""
+        setStreamingInteractions([])
       }
 
       if (finalSessionId && finalSessionId !== currentSessionId) {
