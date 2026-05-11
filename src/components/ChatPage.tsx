@@ -273,8 +273,9 @@ export default function ChatPage() {
 
   const handleStreamEvent = (event: StreamEvent) => {
     const content = event.content || ""
-    if (event.type !== "thinking" && event.type !== "reasoning") {
-      console.log("[STREAM] event:", event.type, "contentLen:", content.length, "interaction:", event.interaction?.kind)
+    // Issue 3 debug: track done/finalization flow
+    if (event.type === "done") {
+      console.log("[FINALIZE] done event received, session:", event.session_id, "msgId:", event.message_id, "finalizedRef:", finalizedRef.current)
     }
     if (event.message_id) {
       streamingMessageIdRef.current = event.message_id
@@ -361,7 +362,11 @@ export default function ChatPage() {
 
   /** Finalize a streaming session: save the message and end streaming. */
   function finalizeStream(sessionId: string) {
-    if (finalizedRef.current) return
+    if (finalizedRef.current) {
+      console.log("[FINALIZE] skipped (already finalized)")
+      return
+    }
+    console.log("[FINALIZE] finalizing session:", sessionId, "thinkingLen:", streamingThinkingRef.current.length, "contentLen:", streamingContentRef.current.length, "interactions:", streamingInteractionsRef.current.length, "blocks:", streamingBlocksRef.current.length, "msgId:", streamingMessageIdRef.current)
     finalizedRef.current = true
 
     const finalContent = streamingContentRef.current
@@ -417,7 +422,9 @@ export default function ChatPage() {
       if (!attached) return
 
       // Skip finalization if already handled by the "done" event
-      if (!finalizedRef.current) {
+      if (finalizedRef.current) {
+        console.log("[FINALIZE] resumeLiveStream: post-stream skip (already finalized via done event)")
+      } else {
         const finalContent = streamingContentRef.current
         const finalThinking = streamingThinkingRef.current
         const finalInteractions = streamingInteractionsRef.current
@@ -552,7 +559,9 @@ export default function ChatPage() {
       const finalSessionId = returnedSessionId || currentSessionId || ""
 
       // Skip finalization if already handled by the "done" event
-      if (!finalizedRef.current) {
+      if (finalizedRef.current) {
+        console.log("[FINALIZE] handleSend: post-stream skip (already finalized via done event)")
+      } else {
         const finalContent = streamingContentRef.current
         const finalThinking = streamingThinkingRef.current
 

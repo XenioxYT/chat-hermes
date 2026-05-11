@@ -556,28 +556,38 @@ function totalTextBlockLength(blocks: any[]): number {
 }
 
 function extractThinkingLabel(thinking: string, blocks: any[]): string {
+  // Debug: track label decisions
+  const blockTypes = blocks?.map((b) => b.type).join(",") || "none"
+
   // Check if there's new thinking content that arrived after the last
   // tool_call. If so, use that instead of the stale tool_call label.
   if (blocks && blocks.length > 0) {
     const last = blocks[blocks.length - 1]
     if (last.type === "tool_call") {
       const textContentLen = totalTextBlockLength(blocks)
+      console.log("[LABEL] tool_call last block | blocks:", blockTypes, "textContentLen:", textContentLen, "thinkingLen:", thinking?.length || 0, "hasNewThinking:", thinking?.length > textContentLen)
       if (thinking && thinking.length > textContentLen) {
         // New thinking arrived after this tool call — fall through to
         // paragraph logic with the new content only.
         const newContent = thinking.slice(textContentLen)
         const paragraphs = newContent.split(/\n\n+/).filter(Boolean)
         const lastParagraph = paragraphs[paragraphs.length - 1] || newContent
-        return truncateHead(lastParagraph.trim(), 75)
+        const result = truncateHead(lastParagraph.trim(), 75)
+        console.log("[LABEL] new thinking after tool_call → paragraph:", result)
+        return result
       }
       // No new thinking — show tool call label
       const toolName = last.interaction?.title || `Tool: ${last.interaction?.kind || "unknown"}`
       const args = last.interaction?.content || ""
       if (args) {
         const combined = `${toolName} ${args}`
-        return truncateHead(combined, 75)
+        const result = truncateHead(combined, 75)
+        console.log("[LABEL] tool_call label →", result)
+        return result
       }
-      return truncateHead(toolName, 75)
+      const result = truncateHead(toolName, 75)
+      console.log("[LABEL] tool_call label (no args) →", result)
+      return result
     }
   }
 
@@ -589,7 +599,9 @@ function extractThinkingLabel(thinking: string, blocks: any[]): string {
   // Split into paragraphs and take the last non-empty one
   const paragraphs = text.split(/\n\n+/).filter(Boolean)
   const lastParagraph = paragraphs[paragraphs.length - 1] || text
-  return truncateHead(lastParagraph.trim(), 75)
+  const result = truncateHead(lastParagraph.trim(), 75)
+  console.log("[LABEL] paragraph path | blocks:", blockTypes, "paragraphs:", paragraphs.length, "result:", result)
+  return result
 }
 
 const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
