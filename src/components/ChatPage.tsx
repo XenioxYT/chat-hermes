@@ -477,6 +477,8 @@ export default function ChatPage() {
       currentSessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       setActiveSessionId(currentSessionId)
       messagesBySession.set(currentSessionId, [])
+      // Update URL immediately so the conversation is navigable before the response starts
+      window.history.replaceState(null, "", `#session=${currentSessionId.slice(0, 12)}`)
     }
 
     const existingMessages = messagesBySession.get(currentSessionId) || []
@@ -668,7 +670,7 @@ export default function ChatPage() {
       thinking: streamingThinking,
       interactions: streamingInteractions,
       blocks: streamingBlocks,
-      id: "streaming",
+      id: streamingMessageIdRef.current || "streaming",
       timestamp: new Date().toISOString(),
     })
   }
