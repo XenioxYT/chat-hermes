@@ -539,7 +539,7 @@ function extractThinkingLabel(blocks: any[]): string {
   const last = blocks[blocks.length - 1]
 
   if (last.type === "tool_call") {
-    const toolName = last.interaction?.tool_name || "unknown"
+    const toolName = last.interaction?.title || last.interaction?.kind || "unknown"
     return `Tool: ${toolName}`
   }
 
