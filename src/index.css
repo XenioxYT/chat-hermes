@@ -111,18 +111,18 @@
       /* Top layer: diagonal shimmer sweep in green */
       linear-gradient(
         110deg,
-        transparent 25%,
+        transparent 15%,
         var(--primary) 50%,
-        transparent 75%
+        transparent 85%
       ),
       /* Bottom layer: grey base colour */
       linear-gradient(var(--muted-foreground), var(--muted-foreground));
-    background-size: 8em 100%, 100% 100%;
+    background-size: 12em 100%, 100% 100%;
     background-repeat: no-repeat, repeat;
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    animation: thinkingSweep 1.8s linear infinite;
+    animation: thinkingSweep 1.2s linear infinite;
   }
 
   .artifact-frame {
@@ -131,8 +131,8 @@
 }
 
 @keyframes thinkingSweep {
-  0% { background-position: -8em center, 0 0; }
-  100% { background-position: 15em center, 0 0; }
+  0% { background-position: -12em center, 0 0; }
+  100% { background-position: 35em center, 0 0; }
 }
 
 /* ------------------------------------------------------------------ */

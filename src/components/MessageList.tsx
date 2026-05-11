@@ -539,8 +539,13 @@ function extractThinkingLabel(blocks: any[]): string {
   const last = blocks[blocks.length - 1]
 
   if (last.type === "tool_call") {
-    const toolName = last.interaction?.title || last.interaction?.kind || "unknown"
-    return `Tool: ${toolName}`
+    const toolName = last.interaction?.title || `Tool: ${last.interaction?.kind || "unknown"}`
+    const args = last.interaction?.content || ""
+    if (args) {
+      const combined = `${toolName} ${args}`
+      return combined.length <= 75 ? combined : combined.slice(0, 72) + "..."
+    }
+    return toolName.length <= 75 ? toolName : toolName.slice(0, 72) + "..."
   }
 
   if (last.type === "text") {
@@ -600,11 +605,6 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
   // Auto-scroll for the thinking container — same pattern as main chat
   const scrollRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
-
-  // Keep open while streaming new content
-  useEffect(() => {
-    if (streaming) setOpen(true)
-  }, [streaming])
 
   // Scroll listener: track if user is near the bottom of the thinking container
   useEffect(() => {
