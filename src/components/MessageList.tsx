@@ -570,7 +570,7 @@ function extractThinkingLabel(thinking: string, blocks: any[]): string {
         // New thinking arrived after this tool call — fall through to
         // paragraph logic with the new content only.
         const newContent = thinking.slice(textContentLen)
-        const paragraphs = newContent.split(/\n\n+/).filter(Boolean)
+        const paragraphs = newContent.split(/\n+/).filter(Boolean)
         const lastParagraph = paragraphs[paragraphs.length - 1] || newContent
         const result = truncateHead(lastParagraph.trim(), 75)
         console.log("[LABEL] new thinking after tool_call → paragraph:", result)
@@ -596,8 +596,8 @@ function extractThinkingLabel(thinking: string, blocks: any[]): string {
   const text = thinking?.trim() || ""
   if (text.length === 0) return "Thinking..."
 
-  // Split into paragraphs and take the last non-empty one
-  const paragraphs = text.split(/\n\n+/).filter(Boolean)
+  // Split into paragraphs on any newline, take the last non-empty one
+  const paragraphs = text.split(/\n+/).filter(Boolean)
   const lastParagraph = paragraphs[paragraphs.length - 1] || text
   const result = truncateHead(lastParagraph.trim(), 75)
   console.log("[LABEL] paragraph path | blocks:", blockTypes, "paragraphs:", paragraphs.length, "result:", result)
