@@ -521,72 +521,41 @@ function ToolCallBubble({ interaction }: { interaction: ChatInteraction }) {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract a dynamic label from the blocks array for the thinking header.
+ * Extract a short label for the collapsed thinking header.
  *
  * Rules:
- *  - No blocks or empty → "Thinking..."
- *  - Last block is a tool_call → "Tool: [tool_name]"
- *  - Last block is text:
- *      ≤ 75 chars → full text
- *      > 75 chars → scan for sentence enders (. : ? !) within first 75.
- *                    Skip numbered list markers (digit + "." + space).
- *                    If ender found → truncate at ender (inclusive).
- *                    Otherwise → truncate at word boundary + "..."
+ *  - No blocks + no thinking text → "Thinking..."
+ *  - Last block is a tool_call → truncated "[tool_name] [args]" (75 chars)
+ *  - Otherwise → first 75 chars of `thinking` string at word boundary + "..."
  */
-function extractThinkingLabel(blocks: any[]): string {
-  if (!blocks || blocks.length === 0) return "Thinking..."
 
-  const last = blocks[blocks.length - 1]
+function truncateAtWord(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text
+  const slice = text.slice(0, maxLen)
+  const lastSpace = slice.lastIndexOf(" ")
+  if (lastSpace > 0) return slice.slice(0, lastSpace) + "..."
+  return slice + "..."
+}
 
-  if (last.type === "tool_call") {
-    const toolName = last.interaction?.title || `Tool: ${last.interaction?.kind || "unknown"}`
-    const args = last.interaction?.content || ""
-    if (args) {
-      const combined = `${toolName} ${args}`
-      return combined.length <= 75 ? combined : combined.slice(0, 72) + "..."
+function extractThinkingLabel(thinking: string, blocks: any[]): string {
+  // If there's a tool call, show that
+  if (blocks && blocks.length > 0) {
+    const last = blocks[blocks.length - 1]
+    if (last.type === "tool_call") {
+      const toolName = last.interaction?.title || `Tool: ${last.interaction?.kind || "unknown"}`
+      const args = last.interaction?.content || ""
+      if (args) {
+        const combined = `${toolName} ${args}`
+        return truncateAtWord(combined, 75)
+      }
+      return truncateAtWord(toolName, 75)
     }
-    return toolName.length <= 75 ? toolName : toolName.slice(0, 72) + "..."
   }
 
-  if (last.type === "text") {
-    const text = last.content || ""
-    if (text.length <= 75) return text
-
-    const searchSpace = text.slice(0, 75)
-
-    // Find the first real sentence ender (skip numbered list markers)
-    let enderIdx = -1
-    for (let i = 0; i < searchSpace.length; i++) {
-      const ch = searchSpace[i]
-      if (ch === "?" || ch === "!" || ch === ":") {
-        enderIdx = i
-        break
-      }
-      if (ch === ".") {
-        // Skip if preceded by a digit (numbered list like "1.")
-        if (i > 0 && /\d/.test(searchSpace[i - 1])) continue
-        // Skip ellipsis "..."
-        if (i + 2 < searchSpace.length && searchSpace[i + 1] === "." && searchSpace[i + 2] === ".") continue
-        enderIdx = i
-        break
-      }
-    }
-
-    if (enderIdx > 0) {
-      return searchSpace.slice(0, enderIdx + 1)
-    }
-
-    // No sentence ender: truncate at word boundary
-    const lastSpace = searchSpace.lastIndexOf(" ")
-    if (lastSpace > 0) {
-      return searchSpace.slice(0, lastSpace) + "..."
-    }
-
-    // No space either: hard truncate
-    return searchSpace + "..."
-  }
-
-  return "Thinking..."
+  // Use the thinking string — always up-to-date during streaming
+  const text = thinking?.trim() || ""
+  if (text.length === 0) return "Thinking..."
+  return truncateAtWord(text, 75)
 }
 
 const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
@@ -659,7 +628,7 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
       >
         <Sparkles className={cn("size-4 shrink-0", streaming && "text-primary")} />
         <span className={cn("min-w-0 flex-1 truncate", streaming && "thinking-gradient")}>
-          {streaming ? extractThinkingLabel(blocks) : summary}
+          {streaming ? extractThinkingLabel(thinking, blocks) : summary}
         </span>
         <ChevronDown className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "-rotate-90")} />
       </button>
