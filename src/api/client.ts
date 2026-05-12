@@ -24,6 +24,8 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system"
   content: string
   thinking?: string
+  /** True while this message is still receiving SSE events. UI-only. */
+  streaming?: boolean
   attachments?: ChatAttachment[]
   interactions?: ChatInteraction[]
   reactions?: Record<string, string[]>

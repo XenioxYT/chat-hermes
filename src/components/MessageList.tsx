@@ -526,8 +526,7 @@ function ToolCallBubble({ interaction }: { interaction: ChatInteraction }) {
  * Rules:
  *  - No blocks + no thinking text → "Thinking..."
  *  - Last block is a tool_call → truncated "[tool_name] [args]" (75 chars)
- *  - Otherwise → first 75 chars (word boundary) of the *last paragraph*,
- *    so the label updates each time a new paragraph starts streaming.
+ *  - Otherwise → a compact preview of the latest reasoning paragraph.
  */
 
 function truncateHead(text: string, maxLen: number): string {
@@ -545,62 +544,83 @@ function renderInlineMarkdown(text: string): string {
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
 }
 
-/**
- * Compute the total length of all text blocks in the blocks array.
- */
-function totalTextBlockLength(blocks: any[]): number {
-  if (!blocks) return 0
-  return blocks
-    .filter((b) => b.type === "text")
-    .reduce((sum, b) => sum + (b.content?.length || 0), 0)
+interface ThinkingLabelCandidate {
+  text: string
+  immediate: boolean
 }
 
-function extractThinkingLabel(thinking: string, blocks: any[]): string {
-  // Debug: track label decisions
-  const blockTypes = blocks?.map((b) => b.type).join(",") || "none"
+const THINKING_LABEL_UPDATE_MS = 1600
+const THINKING_LABEL_MIN_CHARS = 48
+const THINKING_DONE_LABEL = "Show thinking"
 
-  // 1. If the last block is a tool_call with no new thinking → show tool call label
+function normalizeLabelText(text: string): string {
+  return text.replace(/\s+/g, " ").trim()
+}
+
+function initialThinkingLabel(candidate: ThinkingLabelCandidate, streaming: boolean): string {
+  if (!streaming) return THINKING_DONE_LABEL
+  if (!candidate.immediate && candidate.text.length < THINKING_LABEL_MIN_CHARS) {
+    return "Thinking..."
+  }
+  return candidate.text
+}
+
+/**
+ * Build a live preview label for the reasoning disclosure.
+ *
+ * The label always tracks the reasoning prose — tool calls are not promoted
+ * into the preview because they already render as bubbles in the expanded
+ * panel and would otherwise cause distracting flickers each time a new tool
+ * call lands.
+ *
+ * Right after a tool call, the newest paragraph can be only a few characters.
+ * Rather than sliding a rolling window over the transcript (which produced
+ * "...overlap" labels that visually duplicated the previous preview), we hold
+ * on to the most recent *complete* paragraph until the new one is substantial.
+ */
+function extractThinkingLabel(thinking: string, blocks?: any[], streaming = true): ThinkingLabelCandidate {
+  if (!streaming) {
+    return { text: THINKING_DONE_LABEL, immediate: true }
+  }
+
+  // Concatenate every text block (in order) so paragraph history survives the
+  // tool-call boundaries that split the reasoning into fresh blocks.
+  let combined = ""
   if (blocks && blocks.length > 0) {
-    const last = blocks[blocks.length - 1]
-    if (last.type === "tool_call") {
-      const textContentLen = totalTextBlockLength(blocks)
-      console.log("[LABEL] tool_call last block | blocks:", blockTypes, "textContentLen:", textContentLen, "thinkingLen:", thinking?.length || 0, "hasNewThinking:", thinking?.length > textContentLen)
-      if (!thinking || thinking.length <= textContentLen) {
-        // No new thinking — show tool call label
-        const toolName = last.interaction?.title || `Tool: ${last.interaction?.kind || "unknown"}`
-        const args = last.interaction?.content || ""
-        const label = args ? `${toolName} ${args}` : toolName
-        const result = truncateHead(label, 75)
-        console.log("[LABEL] tool_call label →", result)
-        return result
-      }
-      // New thinking after tool call — fall through to block-based extraction
-    }
-  }
-
-  // 2. Get the most recent thinking segment from the last text block.
-  //    Text blocks are separated by tool calls, so each one is a distinct
-  //    thinking segment. Using blocks directly avoids the issue of new
-  //    text being appended to the last line of the full thinking string.
-  let source = thinking?.trim() || ""
-  if (blocks) {
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      if (blocks[i].type === "text" && blocks[i].content?.trim()) {
-        source = blocks[i].content.trim()
-        break
+    for (const block of blocks) {
+      if (block?.type === "text" && block?.content) {
+        if (combined) combined += "\n\n"
+        combined += block.content
       }
     }
   }
+  if (!combined) combined = thinking || ""
 
-  if (!source) return "Thinking..."
+  const paragraphs = combined
+    .split(/\n\n+/)
+    .map((p) => normalizeLabelText(p))
+    .filter(Boolean)
 
-  // 3. Show first 75 chars of the last line within that segment.
-  //    Each \n-separated line gives a label update as the model writes.
-  const lines = source.split(/\n+/).filter(Boolean)
-  const lastLine = lines[lines.length - 1] || source
-  const result = truncateHead(lastLine.trim(), 75)
-  console.log("[LABEL] paragraph path | blocks:", blockTypes, "lines:", lines.length, "sourceLen:", source.length, "result:", result)
-  return result
+  if (paragraphs.length === 0) {
+    return { text: "Thinking...", immediate: false }
+  }
+
+  const latest = paragraphs[paragraphs.length - 1]
+  if (latest.length >= THINKING_LABEL_MIN_CHARS) {
+    return { text: truncateHead(latest, 75), immediate: false }
+  }
+
+  // Latest paragraph is still partial — keep showing the most recent
+  // paragraph that already has enough substance, so the label never devolves
+  // into a single-word fragment or an ellipsis-prefixed overlap.
+  for (let i = paragraphs.length - 2; i >= 0; i--) {
+    if (paragraphs[i].length >= THINKING_LABEL_MIN_CHARS) {
+      return { text: truncateHead(paragraphs[i], 75), immediate: false }
+    }
+  }
+
+  // No paragraph has reached the minimum yet — show whatever we have.
+  return { text: truncateHead(latest, 75), immediate: false }
 }
 
 const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
@@ -615,10 +635,81 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
   blocks?: any[]
 }) {
   const [open, setOpen] = useState(false)
+  const labelCandidate = useMemo(
+    () => extractThinkingLabel(thinking, blocks, streaming),
+    [thinking, blocks, streaming],
+  )
+  const [displayedLabel, setDisplayedLabel] = useState(() =>
+    initialThinkingLabel(labelCandidate, streaming),
+  )
+  const displayedLabelRef = useRef(initialThinkingLabel(labelCandidate, streaming))
+  const pendingLabelRef = useRef(labelCandidate)
+  const labelTimerRef = useRef<number | null>(null)
+  const lastLabelUpdateRef = useRef(0)
 
   // Auto-scroll for the thinking container — same pattern as main chat
   const scrollRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
+
+  useEffect(() => {
+    displayedLabelRef.current = displayedLabel
+  }, [displayedLabel])
+
+  useEffect(() => {
+    return () => {
+      if (labelTimerRef.current !== null) {
+        window.clearTimeout(labelTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    pendingLabelRef.current = labelCandidate
+    if (displayedLabelRef.current === labelCandidate.text) return
+    if (
+      streaming &&
+      !labelCandidate.immediate &&
+      displayedLabelRef.current === "Thinking..." &&
+      labelCandidate.text.length < THINKING_LABEL_MIN_CHARS
+    ) {
+      return
+    }
+
+    const applyPendingLabel = () => {
+      labelTimerRef.current = null
+      const nextLabel = pendingLabelRef.current.text
+      if (displayedLabelRef.current !== nextLabel) {
+        displayedLabelRef.current = nextLabel
+        setDisplayedLabel(nextLabel)
+      }
+      lastLabelUpdateRef.current = Date.now()
+    }
+
+    // Apply immediately when:
+    //  - the agent has stopped streaming (final state)
+    //  - the candidate explicitly wants to bypass throttling
+    //  - this is the first non-empty label for this message
+    if (!streaming || labelCandidate.immediate || lastLabelUpdateRef.current === 0) {
+      if (labelTimerRef.current !== null) {
+        window.clearTimeout(labelTimerRef.current)
+        labelTimerRef.current = null
+      }
+      applyPendingLabel()
+      return
+    }
+
+    const elapsed = Date.now() - lastLabelUpdateRef.current
+    const remaining = THINKING_LABEL_UPDATE_MS - elapsed
+    if (remaining <= 0) {
+      if (labelTimerRef.current !== null) {
+        window.clearTimeout(labelTimerRef.current)
+        labelTimerRef.current = null
+      }
+      applyPendingLabel()
+    } else if (labelTimerRef.current === null) {
+      labelTimerRef.current = window.setTimeout(applyPendingLabel, remaining)
+    }
+  }, [labelCandidate, streaming])
 
   // Scroll listener: track if user is near the bottom of the thinking container
   useEffect(() => {
@@ -631,12 +722,12 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
     return () => el.removeEventListener("scroll", handler)
   }, [])
 
-  // Auto-scroll when new thinking content arrives during streaming
+  // Auto-scroll when new thinking content or tool-call blocks arrive during streaming.
   useEffect(() => {
     if (streaming && open && scrollRef.current && isNearBottomRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [thinking, streaming, open])
+  }, [thinking, blocks, streaming, open])
 
   // Filter for tool_call interactions
   const toolCalls = interactions?.filter((i) => i.kind === "tool_call") || []
@@ -648,15 +739,6 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
     }
     return parseThinkingSegments(thinking, toolCalls)
   }, [blocks, thinking, toolCalls])
-
-  // Summary line for the collapsed header
-  const summary =
-    thinking
-      .split("\n")
-      .map((line) => line.trim())
-      .find(Boolean)
-      ?.replace(/^[-*\d.\s]+/, "")
-      .slice(0, 90) || "Thinking"
 
   // No content at all — hide the component
   if (!segments.some((s) => s.type === "text" && s.content.trim()) && toolCalls.length === 0) {
@@ -672,13 +754,21 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
         aria-expanded={open}
       >
         <Sparkles className={cn("size-4 shrink-0", streaming && "text-primary")} />
-        <span className={cn("min-w-0 flex-1 truncate", streaming && "thinking-gradient")}
-          dangerouslySetInnerHTML={{
-            __html: streaming
-              ? renderInlineMarkdown(extractThinkingLabel(thinking, blocks))
-              : renderInlineMarkdown(summary),
-          }}
-        />
+        <span className="relative min-w-0 flex-1 overflow-hidden">
+          <AnimatePresence initial={false} mode="wait">
+            <motion.span
+              key={displayedLabel}
+              className={cn("block truncate", streaming && "thinking-gradient")}
+              initial={{ opacity: 0, y: 6, filter: "blur(2px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -6, filter: "blur(2px)" }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              dangerouslySetInnerHTML={{
+                __html: renderInlineMarkdown(displayedLabel),
+              }}
+            />
+          </AnimatePresence>
+        </span>
         <ChevronDown className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "-rotate-90")} />
       </button>
       <div className={cn("grid transition-all duration-200", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
@@ -908,7 +998,7 @@ function MessageRow({
   onArtifactSidebar?: (code: string, language: string) => void
 }) {
   const isUser = message.role === "user"
-  const isStreaming = message.id === "streaming"
+  const isStreaming = message.streaming === true
   const parsed = useMemo(
     () => extractThinking(message.content, message.thinking),
     [message.content, message.thinking],

@@ -593,9 +593,10 @@ export default function ChatPage() {
       interaction,
     )
     setStreamingInteractions([...streamingInteractionsRef.current])
+    const currentMessages = messagesBySession.get(activeSessionId) || []
     messagesBySession.set(
       activeSessionId,
-      messages.map((message) => ({
+      currentMessages.map((message) => ({
         ...message,
         interactions: message.interactions?.some((item) => item.id === interaction.id)
           ? upsertInteraction(message.interactions, interaction)
@@ -603,7 +604,7 @@ export default function ChatPage() {
       })),
     )
     forceUpdate()
-  }, [activeSessionId, forceUpdate])
+  }, [activeSessionId, forceUpdate, messagesBySession])
 
   const handleAction = useCallback(async (interactionId: string, value: string) => {
     try {
@@ -624,13 +625,18 @@ export default function ChatPage() {
         messagesBySession.set(activeSessionId, [...messages, message])
         forceUpdate()
         await loadSessions()
+
+        // Refresh model badge after model picker changes model
+        if (result.interaction?.kind === "model_select" && result.interaction.disabled) {
+          loadModelInfo(activeSessionId)
+        }
       }
     } catch (err) {
       const errorMsg =
         err instanceof Error ? err.message : "Failed to perform action"
       setError(errorMsg)
     }
-  }, [activeSessionId, forceUpdate, updateInteractionEverywhere])
+  }, [activeSessionId, forceUpdate, updateInteractionEverywhere, loadModelInfo])
 
   const handleArtifactSidebar = useCallback((code: string, language: string) => {
     setSidebarArtifact((prev) =>
@@ -673,6 +679,7 @@ export default function ChatPage() {
       role: "assistant" as const,
       content: streamingDisplay,
       thinking: streamingThinking,
+      streaming: true,
       interactions: streamingInteractions,
       blocks: streamingBlocks,
       id: streamingMessageIdRef.current || "streaming",
