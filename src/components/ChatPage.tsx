@@ -23,9 +23,6 @@ import {
   togglePinSession,
   toggleArchiveSession,
   fetchSessionBySlug,
-  sendBranch,
-  sendUndo,
-  fetchCommandPanel,
 } from "../api/client"
 import type { ModelInfo, ModelProvider } from "../api/client"
 import { Button } from "@/components/ui/button"
@@ -466,51 +463,6 @@ export default function ChatPage() {
     setError(null)
     updateStreamingState(true)
 
-    // ── Command panel detection ──────────────────────────────────────
-    const PANEL_COMMANDS = ["/reasoning", "/personality", "/goal", "/background", "/usage"]
-    const lowerText = text.toLowerCase()
-    const isPanelCommand = PANEL_COMMANDS.some((cmd) => lowerText.startsWith(cmd))
-
-    if (isPanelCommand) {
-      const cmdName = PANEL_COMMANDS.find((cmd) => lowerText.startsWith(cmd))!
-      try {
-        const panelResp = await fetchCommandPanel(cmdName, currentSessionId || "")
-        if (panelResp.status === "ok") {
-          const panel = panelResp.panel
-          const panelInteraction = {
-            id: `panel-${Date.now()}`,
-            kind: "command_panel",
-            title: panel.title,
-            content: panel.content,
-            controls: panel.controls.map((c) => ({
-              label: c.label,
-              value: `${cmdName}|${c.value}`,
-              variant: (c as any).variant || "secondary",
-            })),
-            disabled: false,
-          }
-          const sessionMessages = messagesBySession.get(currentSessionId || "") || []
-          messagesBySession.set(currentSessionId || "", [
-            ...sessionMessages,
-            {
-              role: "assistant",
-              content: "",
-              interactions: [panelInteraction],
-              id: generateMessageId(),
-              timestamp: new Date().toISOString(),
-            },
-          ])
-          forceUpdate()
-          scrollToBottom()
-        }
-      } catch (err) {
-        console.error("[PANEL] Error:", err)
-      }
-      setLoading(false)
-      updateStreamingState(false)
-      return
-    }
-
     streamingContentRef.current = ""
     streamingThinkingRef.current = ""
     streamingInteractionsRef.current = []
@@ -648,27 +600,6 @@ export default function ChatPage() {
     })
   }, [activeSessionId])
 
-  const handlePerMessageAction = useCallback(
-    async (command: "fork" | "undo", messageIndex: number) => {
-      const sessionId = activeSessionId
-      if (!sessionId) return
-      try {
-        if (command === "fork") {
-          await sendBranch(sessionId)
-          // Refresh sessions to show the new branch
-          loadSessions()
-        } else if (command === "undo") {
-          await sendUndo(sessionId, messageIndex)
-          loadMessages(sessionId)
-        }
-      } catch (err) {
-        console.error(`[${command}] Action error:`, err)
-        setError(err instanceof Error ? err.message : `${command} failed`)
-      }
-    },
-    [activeSessionId, loadSessions, loadMessages],
-  )
-
   const updateInteractionEverywhere = useCallback((interaction: ChatInteraction) => {
     if (!activeSessionId) return
     streamingInteractionsRef.current = upsertInteraction(
@@ -690,33 +621,6 @@ export default function ChatPage() {
   }, [activeSessionId, forceUpdate, messagesBySession])
 
   const handleAction = useCallback(async (interactionId: string, value: string) => {
-    // ── Command panel actions (frontend-only) ──────────────────────────
-    if (interactionId.startsWith("panel-")) {
-      const [cmdName, cmdValue] = value.split("|")
-      if (cmdName && cmdValue && activeSessionId) {
-        // Send the real command through the gateway
-        setLoading(true)
-        const commandText = cmdValue === "show" ? `${cmdName}` : `${cmdName} ${cmdValue}`
-        const returnedId = await sendMessage(commandText, activeSessionId, handleStreamEvent).catch((err) => {
-          console.error("[PANEL] Send command failed:", err)
-          setError(err instanceof Error ? err.message : "Command failed")
-        })
-        setLoading(false)
-        // Disable the interaction locally
-        updateInteractionEverywhere({
-          id: interactionId,
-          kind: "command_panel",
-          title: "",
-          content: "",
-          controls: [],
-          disabled: true,
-          selected: cmdValue,
-        } as any)
-        await loadSessions()
-      }
-      return
-    }
-
     try {
       const result = await performAction(interactionId, value)
       if (result.interaction) {
@@ -879,7 +783,6 @@ export default function ChatPage() {
                   messages={allDisplayMessages}
                   onAction={handleAction}
                   onArtifactSidebar={handleArtifactSidebar}
-                  onSendCommand={handlePerMessageAction}
                 />
                 <div ref={messagesEndRef} className="h-4" />
               </>

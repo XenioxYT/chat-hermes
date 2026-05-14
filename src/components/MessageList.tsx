@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Check, ChevronDown, Copy, Download, File, GitFork, Sparkles, Undo2, User, X, Eye } from "lucide-react"
+import { Check, ChevronDown, Copy, Download, File, Sparkles, User, X, Eye } from "lucide-react"
 import MarkdownRenderer from "./MarkdownRenderer"
 import type { ChatAttachment, ChatInteraction, ChatMessage } from "../api/client"
 import { authedFileUrl, localMediaUrl, mediaFileUrl } from "../api/client"
@@ -17,7 +17,6 @@ interface MessageListProps {
   messages: ChatMessage[]
   onAction?: (interactionId: string, value: string) => Promise<void> | void
   onArtifactSidebar?: (code: string, language: string) => void
-  onSendCommand?: (command: "fork" | "undo", messageIndex: number) => void
 }
 
 interface MediaSegment {
@@ -852,45 +851,13 @@ const InlineMediaRenderer = React.memo(function InlineMediaRenderer({
 
 function MessageActions({
   message,
-  messageIndex,
-  onSendCommand,
 }: {
   message: ChatMessage
-  messageIndex?: number
-  onSendCommand?: (command: "fork" | "undo", messageIndex: number) => void
 }) {
   const [copied, setCopied] = useState(false)
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(message.content)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  const isAssistant = message.role === "assistant"
-
   return (
     <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-      {isAssistant && messageIndex !== undefined && onSendCommand && (
-        <>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => onSendCommand("fork", messageIndex)}
-            title="Branch conversation from this point"
-          >
-            <GitFork className="size-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => onSendCommand("undo", messageIndex)}
-            title="Undo to this point"
-          >
-            <Undo2 className="size-3" />
-          </Button>
-        </>
-      )}
       <Button variant="ghost" size="icon-xs" onClick={handleCopy} title="Copy message">
         {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
       </Button>
@@ -899,7 +866,7 @@ function MessageActions({
 }
 
 // ---------------------------------------------------------------------------
-// InteractionPanel — existing action-panel interactions (unchanged)
+// InteractionPanel — action-panel interactions (unchanged)
 // ---------------------------------------------------------------------------
 
 function InteractionPanel({
@@ -1019,13 +986,11 @@ function MessageRow({
   message,
   onAction,
   onArtifactSidebar,
-  onSendCommand,
   messageIndex,
 }: {
   message: ChatMessage
   onAction?: (interactionId: string, value: string) => Promise<void> | void
   onArtifactSidebar?: (code: string, language: string) => void
-  onSendCommand?: (command: "fork" | "undo", messageIndex: number) => void
   messageIndex?: number
 }) {
   const isUser = message.role === "user"
@@ -1068,7 +1033,7 @@ function MessageRow({
         </div>
         <div className="flex items-center gap-2 pr-1 text-xs text-muted-foreground">
           <span>{formatTime(message.timestamp)}</span>
-          <MessageActions message={{ ...message, content: textOnlyContent }} onSendCommand={onSendCommand} messageIndex={messageIndex} />
+          <MessageActions message={{ ...message, content: textOnlyContent }} messageIndex={messageIndex} />
         </div>
       </div>
     </motion.article>
@@ -1112,7 +1077,7 @@ function MessageRow({
               />
             ))}
           <div className="mt-2">
-            <MessageActions message={{ ...message, content: textOnlyContent }} onSendCommand={onSendCommand} messageIndex={messageIndex} />
+            <MessageActions message={{ ...message, content: textOnlyContent }} messageIndex={messageIndex} />
           </div>
         </div>
       </div>
@@ -1124,7 +1089,7 @@ function MessageRow({
 // MessageList — the main exported component
 // ---------------------------------------------------------------------------
 
-export default React.memo(function MessageList({ messages, onAction, onArtifactSidebar, onSendCommand }: MessageListProps) {
+export default React.memo(function MessageList({ messages, onAction, onArtifactSidebar }: MessageListProps) {
   if (messages.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -1145,7 +1110,6 @@ export default React.memo(function MessageList({ messages, onAction, onArtifactS
             message={msg}
             onAction={onAction}
             onArtifactSidebar={onArtifactSidebar}
-            onSendCommand={onSendCommand}
             messageIndex={idx}
           />
         ))}
