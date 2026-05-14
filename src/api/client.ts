@@ -671,3 +671,55 @@ export function localMediaUrl(absolutePath: string): string {
   const token = getToken()
   return `${API_BASE}/api/media?path=${encodeURIComponent(absolutePath)}&token=${encodeURIComponent(token || "")}`
 }
+
+// ── Command panel / per-message actions ────────────────────────────────
+
+export interface CommandPanelData {
+  title: string
+  content: string
+  controls: { label: string; value: string; variant?: string }[]
+  secondary_controls?: { label: string; value: string; variant?: string }[]
+  has_text_input?: boolean
+  input_placeholder?: string
+}
+
+export interface CommandPanelResponse {
+  status: string
+  panel: CommandPanelData
+}
+
+/**
+ * Fetch interaction panel data for a slash command (e.g. /reasoning, /personality).
+ */
+export async function fetchCommandPanel(
+  command: string,
+  sessionId: string,
+): Promise<CommandPanelResponse> {
+  return apiRequest<CommandPanelResponse>("/api/command-panel", {
+    method: "POST",
+    body: JSON.stringify({ command, session_id: sessionId }),
+  })
+}
+
+/**
+ * Branch the current session from a specific point.
+ */
+export async function sendBranch(sessionId: string): Promise<{ status: string; message: string }> {
+  return apiRequest<{ status: string; message: string }>("/api/branch", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+}
+
+/**
+ * Undo to a specific message index in a session.
+ */
+export async function sendUndo(
+  sessionId: string,
+  messageIndex: number,
+): Promise<{ status: string; message: string }> {
+  return apiRequest<{ status: string; message: string }>("/api/undo", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId, message_index: messageIndex }),
+  })
+}
