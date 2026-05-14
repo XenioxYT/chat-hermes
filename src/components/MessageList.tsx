@@ -856,6 +856,12 @@ function MessageActions({
 }) {
   const [copied, setCopied] = useState(false)
 
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(message.content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
   return (
     <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
       <Button variant="ghost" size="icon-xs" onClick={handleCopy} title="Copy message">
@@ -1033,7 +1039,7 @@ function MessageRow({
         </div>
         <div className="flex items-center gap-2 pr-1 text-xs text-muted-foreground">
           <span>{formatTime(message.timestamp)}</span>
-          <MessageActions message={{ ...message, content: textOnlyContent }} messageIndex={messageIndex} />
+          <MessageActions message={{ ...message, content: textOnlyContent }} />
         </div>
       </div>
     </motion.article>
@@ -1077,7 +1083,7 @@ function MessageRow({
               />
             ))}
           <div className="mt-2">
-            <MessageActions message={{ ...message, content: textOnlyContent }} messageIndex={messageIndex} />
+            <MessageActions message={{ ...message, content: textOnlyContent }} />
           </div>
         </div>
       </div>

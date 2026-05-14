@@ -30,6 +30,80 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import ArtifactRenderer from "./ArtifactRenderer"
 
+// ── Command panel configurations ──────────────────────────────────────────
+
+interface PanelConfigControl {
+  label: string
+  value: string
+  variant?: "default" | "secondary" | "ghost" | "destructive"
+}
+
+interface PanelConfig {
+  title: string
+  content: string
+  controls: PanelConfigControl[]
+  secondary_controls?: PanelConfigControl[]
+}
+
+const PANEL_CONFIGS: Record<string, PanelConfig> = {
+  "/reasoning": {
+    title: "Reasoning configuration",
+    content: "**Reasoning** controls how much the model thinks before responding.",
+    controls: [
+      { label: "None", value: "none", variant: "secondary" },
+      { label: "Minimal", value: "minimal", variant: "secondary" },
+      { label: "Low", value: "low", variant: "secondary" },
+      { label: "Medium", value: "medium", variant: "default" },
+      { label: "High", value: "high", variant: "secondary" },
+      { label: "XHigh", value: "xhigh", variant: "secondary" },
+    ],
+    secondary_controls: [
+      { label: "Show thinking", value: "show", variant: "ghost" },
+      { label: "Hide thinking", value: "hide", variant: "ghost" },
+    ],
+  },
+  "/personality": {
+    title: "Personality presets",
+    content: "Choose a personality for Hermes in this session.",
+    controls: [
+      { label: "Default", value: "default", variant: "default" },
+      { label: "Professional", value: "professional", variant: "secondary" },
+      { label: "Creative", value: "creative", variant: "secondary" },
+      { label: "Humorous", value: "humorous", variant: "secondary" },
+      { label: "Concise", value: "concise", variant: "secondary" },
+      { label: "Empathetic", value: "empathetic", variant: "secondary" },
+      { label: "Socratic", value: "socratic", variant: "secondary" },
+      { label: "Pirate", value: "pirate", variant: "secondary" },
+    ],
+  },
+  "/goal": {
+    title: "Standing goal",
+    content: "A **standing goal** is something Hermes works on across multiple turns.",
+    controls: [
+      { label: "Set goal", value: "set", variant: "default" },
+      { label: "Show status", value: "status", variant: "secondary" },
+      { label: "Pause", value: "pause", variant: "secondary" },
+      { label: "Resume", value: "resume", variant: "secondary" },
+      { label: "Clear", value: "clear", variant: "destructive" },
+    ],
+  },
+  "/background": {
+    title: "Background task",
+    content: "Run a prompt in the background.",
+    controls: [
+      { label: "Run in background", value: "run", variant: "default" },
+    ],
+  },
+  "/usage": {
+    title: "Usage & token stats",
+    content: "Session usage information.",
+    controls: [
+      { label: "Show usage", value: "show", variant: "default" },
+      { label: "Show insights", value: "insights", variant: "secondary" },
+    ],
+  },
+}
+
 function generateMessageId(): string {
   return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -459,6 +533,56 @@ export default function ChatPage() {
       return
     }
 
+    // ── Command panel detection ──
+    const lowerText = text.toLowerCase().trim()
+    const panelConfig = PANEL_CONFIGS[lowerText]
+    if (panelConfig) {
+      setInput("")
+
+      let currentSessionId = activeSessionId
+      if (!currentSessionId) {
+        currentSessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        setActiveSessionId(currentSessionId)
+        messagesBySession.set(currentSessionId, [])
+        window.history.replaceState(null, "", `#session=${currentSessionId.slice(0, 12)}`)
+      }
+
+      const allControls = [
+        ...panelConfig.controls.map((c) => ({
+          ...c,
+          value: `${lowerText} ${c.value}`,
+        })),
+        ...(panelConfig.secondary_controls || []).map((c) => ({
+          ...c,
+          value: `${lowerText} ${c.value}`,
+        })),
+      ]
+
+      const panelInteraction: ChatInteraction = {
+        id: `panel-${Date.now()}`,
+        kind: "command_panel",
+        title: panelConfig.title,
+        content: panelConfig.content,
+        controls: allControls,
+        disabled: false,
+      }
+
+      const sessionMessages = messagesBySession.get(currentSessionId) || []
+      messagesBySession.set(currentSessionId, [
+        ...sessionMessages,
+        {
+          role: "assistant",
+          content: "",
+          interactions: [panelInteraction],
+          id: generateMessageId(),
+          timestamp: new Date().toISOString(),
+        },
+      ])
+      forceUpdate()
+      scrollToBottom()
+      return
+    }
+
     setLoading(true)
     setError(null)
     updateStreamingState(true)
@@ -621,6 +745,72 @@ export default function ChatPage() {
   }, [activeSessionId, forceUpdate, messagesBySession])
 
   const handleAction = useCallback(async (interactionId: string, value: string) => {
+    // ── Frontend-generated panel actions ──
+    if (interactionId.startsWith("panel-")) {
+      const command = value
+      if (!command || !activeSessionId) return
+
+      setLoading(true)
+      updateStreamingState(true)
+      resetStreamingBuffers()
+
+      // Add user message
+      const userMsg: ChatMessage = {
+        role: "user",
+        content: command,
+        id: generateMessageId(),
+        timestamp: new Date().toISOString(),
+      }
+      const msgs = messagesBySession.get(activeSessionId) || []
+      messagesBySession.set(activeSessionId, [...msgs, userMsg])
+      forceUpdate()
+      scrollToBottom()
+
+      try {
+        await sendMessage(command, activeSessionId, handleStreamEvent)
+      } catch (err: any) {
+        const errMsg = err instanceof Error ? err.message : "Command failed"
+        setError(errMsg)
+        updateStreamingState(false)
+        setLoading(false)
+        return
+      }
+
+      // Finalize assistant message from streaming buffers
+      const finalContent = streamingContentRef.current
+      if (finalContent || streamingThinkingRef.current || streamingInteractionsRef.current.length > 0) {
+        const sessionMessages = messagesBySession.get(activeSessionId) || []
+        const assistantMsg: ChatMessage = {
+          role: "assistant",
+          content: finalContent,
+          thinking: streamingThinkingRef.current,
+          interactions: streamingInteractionsRef.current,
+          blocks: streamingBlocksRef.current,
+          id: streamingMessageIdRef.current || generateMessageId(),
+          timestamp: new Date().toISOString(),
+        }
+        messagesBySession.set(activeSessionId, [...sessionMessages, assistantMsg])
+      }
+
+      updateStreamingState(false)
+      setLoading(false)
+      resetStreamingBuffers()
+      await loadSessions()
+
+      // Disable the panel interaction
+      updateInteractionEverywhere({
+        id: interactionId,
+        kind: "command_panel",
+        title: "",
+        content: "",
+        controls: [],
+        disabled: true,
+        selected: command,
+      } as ChatInteraction)
+
+      return
+    }
+
     try {
       const result = await performAction(interactionId, value)
       if (result.interaction) {
@@ -650,7 +840,7 @@ export default function ChatPage() {
         err instanceof Error ? err.message : "Failed to perform action"
       setError(errorMsg)
     }
-  }, [activeSessionId, forceUpdate, updateInteractionEverywhere, loadModelInfo, loadSessions])
+  }, [activeSessionId, forceUpdate, updateInteractionEverywhere, loadModelInfo, loadSessions, resetStreamingBuffers])
 
   const handleArtifactSidebar = useCallback((code: string, language: string) => {
     setSidebarArtifact((prev) =>
