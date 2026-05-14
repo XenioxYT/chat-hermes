@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Bot, Check, ChevronDown, Copy, Download, File, Sparkles, User, X, Eye } from "lucide-react"
+import { Check, ChevronDown, Copy, Download, File, Sparkles, User, X, Eye } from "lucide-react"
 import MarkdownRenderer from "./MarkdownRenderer"
 import type { ChatAttachment, ChatInteraction, ChatMessage } from "../api/client"
 import { authedFileUrl, localMediaUrl, mediaFileUrl } from "../api/client"
@@ -424,7 +424,7 @@ function ImageViewer({
             <button
               type="button"
               onClick={() => setZoom((z) => Math.min(z + 0.5, 5))}
-              className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition-colors hover:bg-black/70"
+              className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur transition-colors hover:bg-black/70"
               title="Zoom in"
             >
               <span className="text-lg font-bold leading-none">+</span>
@@ -435,7 +435,7 @@ function ImageViewer({
                 setZoom(1)
                 setPan({ x: 0, y: 0 })
               }}
-              className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition-colors hover:bg-black/70"
+              className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur transition-colors hover:bg-black/70"
               title="Reset zoom"
             >
               <span className="text-xs font-bold leading-none">1:1</span>
@@ -443,18 +443,18 @@ function ImageViewer({
             <a
               href={src}
               download={title || alt || "image"}
-              className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition-colors hover:bg-black/70"
+              className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur transition-colors hover:bg-black/70"
               title="Download image"
               onClick={(e) => e.stopPropagation()}
             >
               <Download className="size-4" />
             </a>
-            <DialogClose className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-sm transition-colors hover:bg-black/70">
+            <DialogClose className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur transition-colors hover:bg-black/70">
               <X className="size-4" />
             </DialogClose>
           </div>
           {zoom > 1 && (
-            <div className="absolute bottom-3 left-3 rounded-full bg-black/50 px-2 py-1 text-xs text-white backdrop-blur-sm">
+            <div className="absolute bottom-3 left-3 rounded-full bg-black/50 px-2 py-1 text-xs text-white backdrop-blur">
               {Math.round(zoom * 100)}%
             </div>
           )}
@@ -746,36 +746,36 @@ const ThinkingDisclosure = React.memo(function ThinkingDisclosure({
   }
 
   return (
-    <div className="mb-3 rounded-xl border border-border/70 bg-muted/30">
+    <div className="mb-3 rounded-xl border border-border/50 bg-muted/10 backdrop-blur">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground"
         aria-expanded={open}
       >
-        <Sparkles className={cn("size-4 shrink-0", streaming && "text-primary")} />
+        <Sparkles className={cn("size-4 shrink-0 transition-colors duration-300", streaming && "text-primary")} />
         <span className="relative min-w-0 flex-1 overflow-hidden">
           <AnimatePresence initial={false} mode="wait">
             <motion.span
               key={displayedLabel}
               className={cn("block truncate", streaming && "thinking-gradient")}
-              initial={{ opacity: 0, y: 6, filter: "blur(2px)" }}
+              initial={{ opacity: 0, y: 5, filter: "blur(3px)" }}
               animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              exit={{ opacity: 0, y: -6, filter: "blur(2px)" }}
-              transition={{ duration: 0.18, ease: "easeOut" }}
+              exit={{ opacity: 0, y: -5, filter: "blur(3px)" }}
+              transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
               dangerouslySetInnerHTML={{
                 __html: renderInlineMarkdown(displayedLabel),
               }}
             />
           </AnimatePresence>
         </span>
-        <ChevronDown className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "-rotate-90")} />
+        <ChevronDown className={cn("size-4 shrink-0 transition-transform duration-250", open ? "rotate-180" : "-rotate-90")} />
       </button>
-      <div className={cn("grid transition-all duration-200", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+      <div className={cn("grid transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]", open ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
           <div className="min-h-0 overflow-hidden">
             <div
               ref={scrollRef}
-              className="max-h-[33vh] overflow-y-auto overscroll-contain border-t border-border/70 px-3 py-3 font-mono text-xs leading-5 text-muted-foreground"
+              className="max-h-[33vh] overflow-y-auto overscroll-contain border-t border-border/50 px-3 py-3 font-mono text-xs leading-5 text-muted-foreground"
             >
           {segments.map((seg, i) => {
             if (seg.type === "text") {
@@ -1025,9 +1025,9 @@ function MessageRow({
   if (isUser) {
     return (
       <motion.article
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
+      initial={{ opacity: 0, y: 10, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 280, damping: 24 }}
       className="group flex justify-end px-4 py-3"
     >
       <div className="flex max-w-[85%] flex-col items-end gap-2 sm:max-w-[72%]">
@@ -1046,23 +1046,20 @@ function MessageRow({
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
+      transition={{ type: "spring", stiffness: 260, damping: 22 }}
       className="group px-4 py-4"
     >
-      <div className="mx-auto flex max-w-3xl gap-3">
-        <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-primary shadow-xs">
-          <Bot className="size-4" />
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-2 flex items-center gap-2">
+          <Badge variant="secondary" className="border border-border/60 bg-card/50 text-foreground backdrop-blur">
+            Hermes
+          </Badge>
+          <span className="text-xs text-muted-foreground">{formatTime(message.timestamp)}</span>
+          {isStreaming && <span className="text-xs text-primary/70">streaming</span>}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 flex items-center gap-2">
-            <Badge variant="secondary" className="border border-border bg-card text-foreground">
-              Hermes
-            </Badge>
-            <span className="text-xs text-muted-foreground">{formatTime(message.timestamp)}</span>
-            {isStreaming && <span className="text-xs text-primary">streaming</span>}
-          </div>
+        <div className="min-w-0">
           <ThinkingDisclosure
             thinking={parsed.thinking}
             streaming={isStreaming}

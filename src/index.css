@@ -53,37 +53,37 @@
   }
 
   .dark {
-    --background: oklch(0 0 0);
+    --background: oklch(0.08 0 0);
     --foreground: oklch(0.9551 0 0);
-    --card: oklch(0.1448 0 0);
+    --card: oklch(0.13 0.005 200);
     --card-foreground: oklch(0.9551 0 0);
-    --popover: oklch(0.2254 0.0015 197.0479);
+    --popover: oklch(0.18 0.006 200);
     --popover-foreground: oklch(0.9551 0 0);
     --primary: oklch(0.8833 0.2282 147.0345);
     --primary-foreground: oklch(0 0 0);
     --secondary: oklch(0.5006 0.1364 146.5981);
     --secondary-foreground: oklch(0.9551 0 0);
-    --muted: oklch(0.2735 0.0036 286.1561);
-    --muted-foreground: oklch(0.6731 0 0);
+    --muted: oklch(0.22 0.004 200);
+    --muted-foreground: oklch(0.60 0 0);
     --accent: oklch(0.3216 0.0929 146.2133);
     --accent-foreground: oklch(0.9970 0 0);
     --destructive: oklch(0.7859 0.1660 341.3487);
     --destructive-foreground: oklch(1.0000 0 0);
-    --border: oklch(0.2210 0.0015 197.0452);
-    --input: oklch(0.3523 0 0);
+    --border: oklch(0.26 0.006 200);
+    --input: oklch(0.22 0.004 200);
     --ring: oklch(0.8833 0.2282 147.0345);
     --chart-1: oklch(0.8833 0.2282 147.0345);
     --chart-2: oklch(0.9452 0.1133 136.4488);
     --chart-3: oklch(0.9013 0.0704 339.0721);
     --chart-4: oklch(0.9207 0.1231 191.4263);
     --chart-5: oklch(0.7957 0.1175 20.6473);
-    --sidebar: oklch(0.1448 0 0);
+    --sidebar: oklch(0.10 0 0);
     --sidebar-foreground: oklch(0.9551 0 0);
     --sidebar-primary: oklch(0.8833 0.2282 147.0345);
     --sidebar-primary-foreground: oklch(1.0000 0 0);
     --sidebar-accent: oklch(0.2895 0.0895 145.6051);
     --sidebar-accent-foreground: oklch(0.8833 0.2282 147.0345);
-    --sidebar-border: oklch(0.3666 0.0133 203.9546);
+    --sidebar-border: oklch(0.28 0.008 200);
     --sidebar-ring: oklch(0.8833 0.2282 147.0345);
   }
 
@@ -133,6 +133,85 @@
 @keyframes thinkingSweep {
   0% { background-position: -12em center, 0 0; }
   100% { background-position: 35em center, 0 0; }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--primary) 35%, transparent),
+      0 0 12px 2px color-mix(in oklch, var(--primary) 12%, transparent),
+      0 8px 32px 0 color-mix(in oklch, var(--primary) 8%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--primary) 50%, transparent),
+      0 0 20px 4px color-mix(in oklch, var(--primary) 18%, transparent),
+      0 8px 40px 0 color-mix(in oklch, var(--primary) 12%, transparent);
+  }
+}
+
+@keyframes shimmer-slide {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Glass + glow design system                                         */
+/* ------------------------------------------------------------------ */
+
+.glass {
+  background: color-mix(in oklch, var(--card) 40%, transparent);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid color-mix(in oklch, var(--border) 30%, transparent);
+  /* Force GPU compositing so backdrop-filter renders correctly on Chrome/macOS */
+  transform: translateZ(0);
+  will-change: backdrop-filter;
+}
+
+.glass-heavy {
+  background: color-mix(in oklch, var(--card) 55%, transparent);
+  backdrop-filter: blur(48px) saturate(200%);
+  -webkit-backdrop-filter: blur(48px) saturate(200%);
+  border: 1px solid color-mix(in oklch, var(--border) 25%, transparent);
+  transform: translateZ(0);
+  will-change: backdrop-filter;
+}
+
+.glow-border {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--primary) 35%, transparent),
+    0 0 16px 2px color-mix(in oklch, var(--primary) 14%, transparent),
+    0 4px 24px 0 color-mix(in oklch, var(--primary) 8%, transparent);
+}
+
+.glow-border-active {
+  animation: glow-pulse 2.5s ease-in-out infinite;
+}
+
+/* Unused — gradient is now handled inline inside MessageInput */
+.input-float-wrapper {}
+
+/* ------------------------------------------------------------------ */
+/* Sidebar utility classes — opacity modifiers on oklch CSS vars don't */
+/* work with Tailwind v3's rgb() opacity system, so we use color-mix() */
+/* ------------------------------------------------------------------ */
+
+.sidebar-bg {
+  background: color-mix(in oklch, var(--sidebar) 95%, transparent);
+}
+
+.sidebar-hover:hover {
+  background: color-mix(in oklch, var(--sidebar-accent) 38%, transparent);
+  border-color: color-mix(in oklch, var(--sidebar-border) 40%, transparent);
+}
+
+.sidebar-border-semi {
+  border-color: color-mix(in oklch, var(--sidebar-border) 40%, transparent);
+}
+
+.sidebar-active-border {
+  border-color: color-mix(in oklch, var(--sidebar-border) 80%, transparent);
 }
 
 /* ------------------------------------------------------------------ */

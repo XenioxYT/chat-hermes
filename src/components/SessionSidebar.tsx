@@ -17,19 +17,41 @@ import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 
-function formatTimestamp(unix: number): string {
-  const date = new Date(unix * 1000)
-  const now = new Date()
-  const diffDays = Math.floor(
-    (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24),
-  )
+interface DateGroup {
+  label: string
+  sessions: Session[]
+}
 
-  if (diffDays === 0) return "Today"
-  if (diffDays === 1) return "Yesterday"
-  return date.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  })
+function groupSessionsByDate(sessions: Session[]): DateGroup[] {
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfYesterday = new Date(startOfToday.getTime() - 86_400_000)
+  const dow = startOfToday.getDay()
+  const startOfThisWeek = new Date(startOfToday.getTime() - dow * 86_400_000)
+  const startOfLastWeek = new Date(startOfThisWeek.getTime() - 7 * 86_400_000)
+
+  const buckets: Map<string, Session[]> = new Map([
+    ["Today", []],
+    ["Yesterday", []],
+    ["This Week", []],
+    ["Last Week", []],
+    ["Earlier", []],
+  ])
+
+  for (const s of sessions) {
+    const d = new Date(s.updated_at * 1000)
+    if (d >= startOfToday) buckets.get("Today")!.push(s)
+    else if (d >= startOfYesterday) buckets.get("Yesterday")!.push(s)
+    else if (d >= startOfThisWeek) buckets.get("This Week")!.push(s)
+    else if (d >= startOfLastWeek) buckets.get("Last Week")!.push(s)
+    else buckets.get("Earlier")!.push(s)
+  }
+
+  const result: DateGroup[] = []
+  for (const [label, items] of buckets) {
+    if (items.length > 0) result.push({ label, sessions: items })
+  }
+  return result
 }
 
 interface SessionSidebarProps {
@@ -45,11 +67,16 @@ interface SessionSidebarProps {
 }
 
 const itemVariants = {
-  hidden: { opacity: 0, x: -12 },
+  hidden: { opacity: 0, x: -8 },
   visible: (i: number) => ({
     opacity: 1,
     x: 0,
-    transition: { duration: 0.2, delay: i * 0.03, ease: "easeOut" },
+    transition: {
+      type: "spring",
+      stiffness: 300,
+      damping: 28,
+      delay: i * 0.02,
+    },
   }),
 }
 
@@ -57,7 +84,7 @@ const sectionVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.04 },
+    transition: { staggerChildren: 0.03 },
   },
 }
 
@@ -75,31 +102,45 @@ export default function SessionSidebar({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [debouncedSearch, setDebouncedSearch] = useState("")
-  const [contextMenuSessionId, setContextMenuSessionId] = useState<
-    string | null
-  >(null)
+  const [contextMenuSessionId, setContextMenuSessionId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [showArchived, setShowArchived] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(20)
   const contextMenuRef = useRef<HTMLDivElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
 
   // Debounce search
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchQuery)
-    }, 200)
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 200)
     return () => clearTimeout(timer)
   }, [searchQuery])
+
+  // Reset visible count when search changes
+  useEffect(() => {
+    setVisibleCount(20)
+  }, [debouncedSearch])
+
+  // IntersectionObserver sentinel for lazy loading
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setVisibleCount((c) => c + 15)
+      },
+      { threshold: 0 },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  })
 
   // Close context menu on outside click
   useEffect(() => {
     if (!contextMenuSessionId) return
     const handleClick = (e: MouseEvent) => {
-      if (
-        contextMenuRef.current &&
-        !contextMenuRef.current.contains(e.target as Node)
-      ) {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
         setContextMenuSessionId(null)
       }
     }
@@ -129,21 +170,16 @@ export default function SessionSidebar({
     [confirmDeleteId, onDelete],
   )
 
-  const handleStartRename = useCallback(
-    (session: Session) => {
-      setRenamingId(session.session_id)
-      setRenameValue(session.title || "New conversation")
-      setContextMenuSessionId(null)
-    },
-    [],
-  )
+  const handleStartRename = useCallback((session: Session) => {
+    setRenamingId(session.session_id)
+    setRenameValue(session.title || "New conversation")
+    setContextMenuSessionId(null)
+  }, [])
 
   const handleSubmitRename = useCallback(
     (sessionId: string) => {
       const trimmed = renameValue.trim()
-      if (trimmed && onRename) {
-        onRename(sessionId, trimmed)
-      }
+      if (trimmed && onRename) onRename(sessionId, trimmed)
       setRenamingId(null)
       setRenameValue("")
     },
@@ -172,31 +208,27 @@ export default function SessionSidebar({
   )
 
   // Filter sessions
-  const pinned = sessions.filter(
-    (s) => s.pinned && (showArchived || !s.archived),
-  )
-  const unpinned = sessions.filter(
-    (s) => !s.pinned && (showArchived || !s.archived),
-  )
-  const archived = sessions.filter(
-    (s) => s.archived,
-  )
+  const pinned = sessions.filter((s) => s.pinned && (showArchived || !s.archived))
+  const unpinned = sessions.filter((s) => !s.pinned && (showArchived || !s.archived))
+  const archived = sessions.filter((s) => s.archived)
 
-  // Apply search filter to visible sessions
   const query = debouncedSearch.toLowerCase().trim()
   const filterBySearch = (list: Session[]) =>
-    query
-      ? list.filter((s) => s.title?.toLowerCase().includes(query))
-      : list
+    query ? list.filter((s) => s.title?.toLowerCase().includes(query)) : list
 
   const displayPinned = filterBySearch(pinned)
   const displayUnpinned = filterBySearch(unpinned)
   const displayArchived = filterBySearch(archived)
 
+  // Apply lazy-loading limit to unpinned sessions, then group by date
+  const visibleUnpinned = displayUnpinned.slice(0, visibleCount)
+  const hasMore = displayUnpinned.length > visibleCount
+  const groupedUnpinned = groupSessionsByDate(visibleUnpinned)
+
   const hasAnySessions =
     displayPinned.length + displayUnpinned.length + displayArchived.length > 0
 
-  const renderSessionItem = (session: Session, index: number, section: string) => {
+  const renderSessionItem = (session: Session, index: number) => {
     const isActive = session.session_id === activeSessionId
     const isConfirming = confirmDeleteId === session.session_id
     const isArchived = session.archived === 1
@@ -213,11 +245,11 @@ export default function SessionSidebar({
       >
         <div
           className={cn(
-            "group relative rounded-xl border transition-all duration-150",
+            "group relative rounded-[6px] border transition-all duration-200",
             isActive
-              ? "border-sidebar-border bg-sidebar-accent shadow-sm"
-              : "border-transparent hover:border-sidebar-border/50 hover:bg-sidebar-accent/50",
-            isArchived && "opacity-60",
+              ? "sidebar-active-border bg-sidebar-accent shadow-sm"
+              : "sidebar-hover border-transparent",
+            isArchived && "opacity-50",
           )}
         >
           <button
@@ -225,17 +257,8 @@ export default function SessionSidebar({
             onDoubleClick={() => {
               if (onRename && !isArchived) handleStartRename(session)
             }}
-            className="flex w-full items-start gap-3 px-3 py-2.5 text-left"
+            className="flex w-full items-start gap-2 px-2.5 py-1.5 text-left"
           >
-            <span
-              className={cn(
-                "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground transition-colors",
-                isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
-                isArchived && "italic",
-              )}
-            >
-              <MessageSquare className="size-3.5" />
-            </span>
             <span className="min-w-0 flex-1">
               {isRenaming ? (
                 <input
@@ -248,36 +271,25 @@ export default function SessionSidebar({
                       e.preventDefault()
                       handleSubmitRename(session.session_id)
                     }
-                    if (e.key === "Escape") {
-                      setRenamingId(null)
-                    }
+                    if (e.key === "Escape") setRenamingId(null)
                   }}
                   onBlur={() => handleSubmitRename(session.session_id)}
                   onClick={(e) => e.stopPropagation()}
                   className={cn(
-                    "w-full rounded-md border border-input bg-background px-2 py-1 text-sm",
+                    "w-full rounded-md border border-input bg-background px-2 py-0.5 text-xs",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   )}
                 />
               ) : (
                 <span
                   className={cn(
-                    "block truncate text-sm font-medium leading-5",
+                    "block truncate text-xs font-medium leading-4",
                     isArchived && "italic text-muted-foreground",
                   )}
                 >
                   {session.title || "New conversation"}
                 </span>
               )}
-              <span className="mt-0.5 block text-[11px] text-muted-foreground/70">
-                {formatTimestamp(session.updated_at)}
-                {session.message_count > 0 && (
-                  <>
-                    {" "}· {session.message_count} msg
-                    {session.message_count !== 1 ? "s" : ""}
-                  </>
-                )}
-              </span>
             </span>
 
             {/* Pin indicator */}
@@ -288,7 +300,7 @@ export default function SessionSidebar({
             )}
           </button>
 
-          {/* Delete button (always visible when confirming) */}
+          {/* Delete confirm button */}
           {isConfirming && (
             <Button
               variant="destructive"
@@ -312,9 +324,7 @@ export default function SessionSidebar({
               onClick={(e) => {
                 e.stopPropagation()
                 setContextMenuSessionId(
-                  contextMenuSessionId === session.session_id
-                    ? null
-                    : session.session_id,
+                  contextMenuSessionId === session.session_id ? null : session.session_id,
                 )
               }}
               className={cn(
@@ -333,8 +343,8 @@ export default function SessionSidebar({
               ref={contextMenuRef}
               className={cn(
                 "absolute right-0 top-0 z-50 w-44",
-                "rounded-lg border border-border/70",
-                "bg-card shadow-xl backdrop-blur-xl",
+                "rounded-[6px] border border-border/70",
+                "bg-card/60 shadow-xl backdrop-blur-2xl",
                 "animate-in fade-in zoom-in-95",
                 "duration-150 ease-out",
                 "overflow-hidden",
@@ -362,10 +372,7 @@ export default function SessionSidebar({
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-accent"
                   >
                     <Pin
-                      className={cn(
-                        "size-3.5",
-                        session.pinned && "fill-primary text-primary",
-                      )}
+                      className={cn("size-3.5", session.pinned && "fill-primary text-primary")}
                     />
                     {session.pinned ? "Unpin" : "Pin"}
                   </button>
@@ -404,24 +411,24 @@ export default function SessionSidebar({
   return (
     <aside
       className={cn(
-        "flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out",
-        open ? "w-72" : "w-0 overflow-hidden",
+        "flex h-full flex-col border-r border-sidebar-border sidebar-bg text-sidebar-foreground backdrop-blur transition-all duration-300 ease-in-out",
+        open ? "w-64" : "w-0 overflow-hidden",
       )}
     >
-      <div className="shrink-0 border-b border-sidebar-border px-4 py-3">
-        <div className="mb-3 flex items-center justify-between">
+      <div className="shrink-0 border-b border-sidebar-border px-3 py-2.5">
+        <div className="mb-2.5 flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold tracking-tight">Hermes</p>
-            <p className="text-[11px] text-muted-foreground/70">Web conversations</p>
+            <p className="text-[10px] text-muted-foreground/60">Web conversations</p>
           </div>
           <Badge
             variant="outline"
-            className="border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground text-[10px] px-2 py-0"
+            className="border-sidebar-border bg-sidebar-accent px-1.5 py-0 text-[10px] text-sidebar-accent-foreground"
           >
             {sessions.length}
           </Badge>
         </div>
-        <Button onClick={onNew} className="w-full justify-start rounded-lg" size="sm">
+        <Button onClick={onNew} className="w-full justify-start rounded-[6px]" size="sm">
           <Plus className="size-3.5" />
           New conversation
         </Button>
@@ -437,14 +444,15 @@ export default function SessionSidebar({
             transition={{ duration: 0.15 }}
             className="shrink-0 overflow-hidden"
           >
-            <div className="px-3 pt-3 pb-1">
+            <div className="px-2.5 pb-1 pt-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/60" />
                 <Input
                   placeholder="Search conversations..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8 rounded-lg border-sidebar-border bg-sidebar-accent/60 pl-7 text-xs placeholder:text-muted-foreground/50"
+                  className="h-8 rounded-[6px] border-sidebar-border pl-7 text-xs text-sidebar-foreground placeholder:text-muted-foreground/50"
+                  style={{ background: "color-mix(in oklch, var(--sidebar-accent) 50%, transparent)" }}
                 />
               </div>
             </div>
@@ -452,18 +460,16 @@ export default function SessionSidebar({
         )}
       </AnimatePresence>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain px-2 py-2">
+      <div className="flex-1 overflow-y-auto overscroll-contain px-1.5 py-1.5">
         {!hasAnySessions ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="mx-2 rounded-xl border border-dashed border-sidebar-border/60 p-4 text-center"
+            className="mx-2 rounded-[6px] border border-dashed border-sidebar-border/60 p-4 text-center"
           >
             <MessageSquare className="mx-auto mb-2 size-5 text-muted-foreground/40" />
             <p className="text-xs text-muted-foreground/60">
-              {query
-                ? "No conversations match"
-                : "No conversations yet"}
+              {query ? "No conversations match" : "No conversations yet"}
             </p>
           </motion.div>
         ) : (
@@ -475,42 +481,53 @@ export default function SessionSidebar({
           >
             {/* Pinned section */}
             {displayPinned.length > 0 && (
-              <motion.li variants={itemVariants} custom={0}>
-                <div className="flex items-center gap-2 px-3 pb-1 pt-2">
-                  <Pin className="size-2.5 fill-primary/50 text-primary/50" />
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
-                    Pinned
-                  </span>
-                </div>
-              </motion.li>
-            )}
-            {displayPinned.map((s, i) => renderSessionItem(s, i, "pinned"))}
-            {displayPinned.length > 0 && displayUnpinned.length > 0 && (
-              <motion.li
-                variants={itemVariants}
-                custom={displayPinned.length}
-                className="px-3 py-1"
-              >
-                <Separator className="bg-sidebar-border/40" />
-              </motion.li>
+              <>
+                <motion.li variants={itemVariants} custom={0}>
+                  <div className="flex items-center gap-2 px-3 pb-1 pt-2">
+                    <Pin className="size-2.5 fill-primary/50 text-primary/50" />
+                    <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+                      Pinned
+                    </span>
+                  </div>
+                </motion.li>
+                {displayPinned.map((s, i) => renderSessionItem(s, i))}
+                {displayUnpinned.length > 0 && (
+                  <motion.li
+                    variants={itemVariants}
+                    custom={displayPinned.length}
+                    className="px-3 py-1"
+                  >
+                    <Separator className="sidebar-border-semi" />
+                  </motion.li>
+                )}
+              </>
             )}
 
-            {/* Unpinned section */}
-            {displayUnpinned.length > 0 && displayPinned.length === 0 && (
-              <motion.li variants={itemVariants} custom={0}>
-                <div className="px-3 pb-1 pt-1">
+            {/* Unpinned — grouped by date */}
+            {groupedUnpinned.map(({ label, sessions: groupSessions }) => (
+              <motion.li key={label} variants={itemVariants} custom={0}>
+                <div className="px-3 pb-0.5 pt-2">
                   <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/40">
-                    Recent
+                    {label}
                   </span>
+                </div>
+                <ul className="space-y-0.5">
+                  {groupSessions.map((s, i) => renderSessionItem(s, i))}
+                </ul>
+              </motion.li>
+            ))}
+
+            {/* Lazy-load sentinel */}
+            {hasMore && (
+              <motion.li variants={itemVariants} custom={0}>
+                <div ref={sentinelRef} className="flex items-center justify-center py-2">
+                  <span className="text-[10px] text-muted-foreground/30">Loading…</span>
                 </div>
               </motion.li>
             )}
-            {displayUnpinned.map((s, i) =>
-              renderSessionItem(s, i + displayPinned.length + (displayPinned.length > 0 ? 1 : 0), "unpinned")
-            )}
 
-            {/* Archived section (when showArchived is true) */}
-            {displayArchived.length > 0 && (
+            {/* Archived section */}
+            {displayArchived.length > 0 && showArchived && (
               <>
                 {displayPinned.length + displayUnpinned.length > 0 && (
                   <motion.li
@@ -518,7 +535,7 @@ export default function SessionSidebar({
                     custom={displayPinned.length + displayUnpinned.length + 1}
                     className="px-3 py-1"
                   >
-                    <Separator className="bg-sidebar-border/40" />
+                    <Separator className="sidebar-border-semi" />
                   </motion.li>
                 )}
                 <motion.li
@@ -532,7 +549,7 @@ export default function SessionSidebar({
                   </div>
                 </motion.li>
                 {displayArchived.map((s, i) =>
-                  renderSessionItem(s, i + displayPinned.length + displayUnpinned.length + 3, "archived")
+                  renderSessionItem(s, i + displayPinned.length + displayUnpinned.length + 3),
                 )}
               </>
             )}
@@ -545,7 +562,7 @@ export default function SessionSidebar({
         <div className="shrink-0 border-t border-sidebar-border p-2">
           <button
             onClick={() => setShowArchived(!showArchived)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] text-muted-foreground/50 transition-colors hover:bg-sidebar-accent hover:text-muted-foreground"
+            className="flex w-full items-center justify-center gap-1.5 rounded-[6px] px-2 py-1.5 text-[11px] text-muted-foreground/50 transition-colors hover:bg-sidebar-accent hover:text-muted-foreground"
           >
             <Archive className="size-3" />
             {showArchived ? "Hide archived" : "Show archived"}

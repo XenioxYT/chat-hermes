@@ -24,6 +24,7 @@ interface MessageInputProps {
   onModelChange?: (provider: string, model: string) => void
   modelChanging?: boolean
   modelLoading?: boolean
+  modelsReady?: boolean
 }
 
 export default function MessageInput({
@@ -39,6 +40,7 @@ export default function MessageInput({
   onModelChange,
   modelChanging = false,
   modelLoading = false,
+  modelsReady = true,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -151,7 +153,8 @@ export default function MessageInput({
     setFiles([])
   }
 
-  const canSend = (value.trim().length > 0 || files.length > 0) && (!loading || isStreaming)
+  const modelsBlocking = !modelsReady && !isStreaming
+  const canSend = (value.trim().length > 0 || files.length > 0) && (!loading || isStreaming) && !modelsBlocking
   const canStop = isStreaming
   const hasTextOrFiles = value.trim().length > 0 || files.length > 0
 
@@ -185,7 +188,7 @@ export default function MessageInput({
   return (
     <div
       className={cn(
-        "border-t border-border/70 bg-background/95 px-3 py-3 backdrop-blur relative",
+        "pointer-events-auto relative px-4 pb-5 pt-1",
         isDragging && "ring-2 ring-primary/50 ring-offset-2 ring-offset-background",
       )}
       onDragOver={handleDragOver}
@@ -193,9 +196,10 @@ export default function MessageInput({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+
       {/* Drop zone overlay */}
       {isDragging && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-background/80 backdrop-blur-sm">
+        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-background/40 backdrop-blur-lg">
           <div className="flex flex-col items-center gap-2 text-sm text-primary">
             <FileUp className="size-8" />
             <span className="font-medium">Drop files here</span>
@@ -203,7 +207,10 @@ export default function MessageInput({
         </div>
       )}
       <div className="mx-auto max-w-3xl">
-        <div className="rounded-2xl border border-border/80 bg-card px-3 py-2.5 shadow-lg shadow-black/5">
+        <div className={cn(
+          "glass rounded-2xl px-3 py-2.5 shadow-2xl shadow-black/20 transition-all duration-300",
+          "focus-within:glow-border",
+        )}>
           {files.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2 px-1">
               {files.map((file, index) => (
@@ -230,10 +237,10 @@ export default function MessageInput({
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder="Write a message..."
-            disabled={loading && !isStreaming}
+            placeholder={modelsBlocking ? "Loading model..." : "Write a message..."}
+            disabled={(loading && !isStreaming) || modelsBlocking}
             rows={1}
-            className="max-h-48 min-h-10 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-50"
+            className="max-h-48 min-h-10 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-40"
           />
 
           <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-border/40 pt-2">
@@ -298,7 +305,7 @@ export default function MessageInput({
                       className={cn(
                         "absolute bottom-full right-0 z-50 mb-2 w-72",
                         "max-h-[60vh] overflow-y-auto rounded-xl border border-border/70",
-                        "bg-card shadow-xl backdrop-blur-xl",
+                        "bg-card/60 shadow-xl backdrop-blur-2xl",
                         "animate-in fade-in zoom-in-95",
                         "duration-150 ease-out",
                       )}

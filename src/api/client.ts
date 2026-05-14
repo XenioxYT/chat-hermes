@@ -93,9 +93,17 @@ export interface LoginResponse {
   user: User
 }
 
+/** A web search source result */
+export interface Source {
+  url: string
+  title: string
+  snippet: string
+  domain: string
+}
+
 /** SSE event received from the streaming response */
 export interface StreamEvent {
-  type: "typing" | "response" | "replace" | "thinking" | "reasoning" | "interaction" | "status" | "done" | "error" | "media"
+  type: "typing" | "response" | "replace" | "thinking" | "reasoning" | "interaction" | "status" | "done" | "error" | "media" | "sources_update"
   content?: string
   session_id?: string
   message_id?: string
@@ -104,6 +112,8 @@ export interface StreamEvent {
   status?: string
   /** Path to a media file (for type: "media" events) */
   path?: string
+  /** Search sources (for type: "sources_update" events) */
+  sources?: Source[]
 }
 
 export interface ActionResponse {
@@ -392,6 +402,15 @@ export async function sendMessage(
 
         try {
           const event: StreamEvent = JSON.parse(jsonStr)
+
+          // Debug: log key events for interactive features
+          if (event.type === "interaction" && event.interaction) {
+            console.log(`📡 SSE interaction: kind=${event.interaction.kind} id=${event.interaction.id} title="${event.interaction.title}" controls=${event.interaction.controls.map(c => c.label).join(",")}`)
+          } else if (event.type === "sources_update") {
+            console.log(`📡 SSE sources_update: ${event.sources?.length || 0} sources`)
+          } else if (event.type === "done") {
+            console.log(`📡 SSE done: session=${event.session_id} msgId=${event.message_id}`)
+          }
 
           // Capture the session_id from the response if provided
           if (event.session_id) {

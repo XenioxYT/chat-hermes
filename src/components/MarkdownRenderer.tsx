@@ -222,7 +222,7 @@ function Table({ children }: { children?: React.ReactNode }) {
         className={cn(
           "absolute right-2 top-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs",
           "opacity-0 transition-opacity group-hover:opacity-100",
-          "border border-border/50 bg-background/80 backdrop-blur-sm",
+          "border border-border/50 bg-background/50 backdrop-blur",
           "hover:bg-accent",
         )}
         title="Copy table as markdown"

@@ -121,6 +121,19 @@ export default function ChatPage() {
     loadSessions()
   }, [])
 
+  // Poll for session title updates (Hermes renames sessions after AI generates a title)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const updated = await fetchSessions()
+        setSessions(updated)
+      } catch {
+        // silently ignore poll errors
+      }
+    }, 30_000)
+    return () => clearInterval(interval)
+  }, [])
+
   // On mount, check URL hash for a conversation slug and navigate to it
   useEffect(() => {
     const hash = window.location.hash.slice(1) // remove '#'
@@ -436,7 +449,7 @@ export default function ChatPage() {
       messagesBySession.set(currentSessionId, [...existingMessages, steerMessage])
       forceUpdate()
 
-      onContent()
+      scrollToBottom()
 
       // Fire-and-forget — no new SSE stream, the existing stream continues
       await sendCommand(steerText, currentSessionId).catch((err) => {
@@ -490,7 +503,8 @@ export default function ChatPage() {
     forceUpdate()
     setInput("")
 
-    onContent()
+    // Always scroll to bottom when user sends — don't rely on sticky state
+    scrollToBottom()
 
     try {
       const returnedSessionId = await sendMessage(
@@ -701,8 +715,8 @@ export default function ChatPage() {
         open={sidebarOpen}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-border/60 bg-background/80 px-3 py-2.5 backdrop-blur-md">
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-between border-b border-border/40 bg-background/40 px-3 py-2.5 backdrop-blur-2xl">
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
@@ -743,7 +757,7 @@ export default function ChatPage() {
           </div>
         </header>
 
-        <main ref={scrollContainerRef} className="scroll-container flex-1 overflow-y-auto">
+        <main ref={scrollContainerRef} className="scroll-container flex-1 overflow-y-auto pb-36">
           <div className="mx-auto w-full max-w-3xl">
             {!activeSessionId && !loading && (
               <motion.div
@@ -789,8 +803,8 @@ export default function ChatPage() {
                     type="button"
                     onClick={jumpDown}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-full border border-border/60 bg-card/90 px-4 py-2 text-xs",
-                      "text-muted-foreground shadow-lg backdrop-blur-md transition-all",
+                      "flex items-center gap-1.5 rounded-full border border-border/60 bg-card/50 px-4 py-2 text-xs",
+                      "text-muted-foreground shadow-lg backdrop-blur-lg transition-all",
                       "hover:bg-accent hover:text-foreground hover:shadow-xl",
                       "active:scale-95",
                     )}
@@ -804,35 +818,38 @@ export default function ChatPage() {
           )}
         </main>
 
-        {error && (
-          <div className="border-t border-border/70 px-4 py-3">
-            <div className="mx-auto max-w-3xl">
-              <Alert variant="destructive" className="py-3">
-                <AlertDescription className="flex items-center justify-between gap-3 text-sm">
-                  <span>{error}</span>
-                  <Button variant="ghost" size="xs" onClick={() => setError(null)}>
-                    Dismiss
-                  </Button>
-                </AlertDescription>
-              </Alert>
+        {/* Floating message input — sits directly over scroll content so backdrop-filter sees messages */}
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-10">
+          {error && (
+            <div className="pointer-events-auto px-4 pb-2">
+              <div className="mx-auto max-w-3xl">
+                <Alert variant="destructive" className="py-2.5">
+                  <AlertDescription className="flex items-center justify-between gap-3 text-sm">
+                    <span>{error}</span>
+                    <Button variant="ghost" size="xs" onClick={() => setError(null)}>
+                      Dismiss
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              </div>
             </div>
-          </div>
-        )}
-
-        <MessageInput
-          value={input}
-          onChange={setInput}
-          onSend={handleSend}
-          loading={loading}
-          isStreaming={isStreaming}
-          onStop={handleStop}
-          currentModel={currentModel}
-          currentProvider={currentProvider}
-          providers={providers}
-          onModelChange={handleModelChange}
-          modelChanging={modelChanging}
-          modelLoading={modelLoading}
-        />
+          )}
+          <MessageInput
+            value={input}
+            onChange={setInput}
+            onSend={handleSend}
+            loading={loading}
+            isStreaming={isStreaming}
+            onStop={handleStop}
+            currentModel={currentModel}
+            currentProvider={currentProvider}
+            providers={providers}
+            onModelChange={handleModelChange}
+            modelChanging={modelChanging}
+            modelLoading={modelLoading}
+            modelsReady={!modelLoading && !!currentModel}
+          />
+        </div>
       </div>
 
       {sidebarArtifact && (
